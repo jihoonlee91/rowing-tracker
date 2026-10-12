@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# 정기 개선 루틴 기록
+.claude-routine/
