@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatDuration, formatPacePer500m } from '../lib/geo';
+import { addWorkout } from '../lib/useWorkoutLog';
 import { useWorkoutTracker } from '../lib/useWorkoutTracker';
+import { isWorthSaving } from '../lib/workouts';
 
 export default function TrackerScreen() {
   const tracker = useWorkoutTracker();
@@ -15,9 +18,42 @@ export default function TrackerScreen() {
     avgSpeed,
   } = tracker;
 
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+
   const isTracking = status === 'tracking';
   const isPaused = status === 'paused';
   const isActive = isTracking || isPaused;
+
+  const start = () => {
+    setSavedNote(null);
+    tracker.start();
+  };
+
+  const finish = async () => {
+    const summary = tracker.finish();
+    if (!summary) return;
+    if (!isWorthSaving(summary.distanceMeters, summary.durationSeconds)) {
+      setSavedNote('너무 짧아서 기록에 저장하지 않았어요.');
+      return;
+    }
+    const strokeRate =
+      summary.strokeCount > 0 && summary.durationSeconds > 0
+        ? (summary.strokeCount / summary.durationSeconds) * 60
+        : undefined;
+    try {
+      await addWorkout({
+        source: 'gps',
+        startedAt: summary.startedAt,
+        distanceMeters: summary.distanceMeters,
+        durationSeconds: summary.durationSeconds,
+        strokeCount: summary.strokeCount || undefined,
+        strokeRate,
+      });
+      setSavedNote('기록 탭에 저장했어요.');
+    } catch {
+      setSavedNote('기록 저장에 실패했어요.');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -36,6 +72,8 @@ export default function TrackerScreen() {
         </Text>
       )}
 
+      {savedNote && !isActive && <Text style={styles.note}>{savedNote}</Text>}
+
       {isActive && (
         <Pressable style={styles.strokeButton} onPress={tracker.logStroke}>
           <Text style={styles.strokeButtonText}>스트로크 탭</Text>
@@ -44,16 +82,16 @@ export default function TrackerScreen() {
 
       <View style={styles.controls}>
         {status === 'idle' || status === 'denied' ? (
-          <PrimaryButton label="운동 시작" onPress={tracker.start} />
+          <PrimaryButton label="운동 시작" onPress={start} />
         ) : isTracking ? (
           <>
             <SecondaryButton label="일시정지" onPress={tracker.pause} />
-            <PrimaryButton label="종료" onPress={tracker.finish} tone="danger" />
+            <PrimaryButton label="종료" onPress={finish} tone="danger" />
           </>
         ) : (
           <>
             <SecondaryButton label="재개" onPress={tracker.resume} />
-            <PrimaryButton label="종료" onPress={tracker.finish} tone="danger" />
+            <PrimaryButton label="종료" onPress={finish} tone="danger" />
           </>
         )}
       </View>
@@ -132,6 +170,11 @@ const styles = StyleSheet.create({
     color: '#8fa8c4',
     marginTop: 4,
     fontSize: 13,
+  },
+  note: {
+    color: '#9fd8a8',
+    textAlign: 'center',
+    marginVertical: 8,
   },
   warning: {
     color: '#ffb4b4',

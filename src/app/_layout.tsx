@@ -18,6 +18,13 @@ export default function RootLayout() {
         }}
       />
       <Tabs.Screen
+        name="log"
+        options={{
+          title: '기록',
+          tabBarIcon: ({ color, size }) => <Ionicons name="list" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="races"
         options={{
           title: '대회',

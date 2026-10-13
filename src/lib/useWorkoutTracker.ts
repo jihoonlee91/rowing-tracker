@@ -8,6 +8,13 @@ export type TrackPoint = {
   timestamp: number;
 };
 
+export type WorkoutSummary = {
+  startedAt: number;
+  distanceMeters: number;
+  durationSeconds: number;
+  strokeCount: number;
+};
+
 export type TrackerStatus = 'idle' | 'requesting-permission' | 'tracking' | 'paused' | 'denied';
 
 const EMPTY_TRACK: TrackAccumulator = { distanceMeters: 0, currentSpeed: 0, last: null };
@@ -27,6 +34,8 @@ export function useWorkoutTracker() {
   // 거리 누적은 ref에서 한다(상태 updater 안에서 다른 상태를 바꾸면 StrictMode에서 두 번 더해짐).
   const trackRef = useRef<TrackAccumulator>(EMPTY_TRACK);
   const newSegmentRef = useRef(true);
+  const strokeCountRef = useRef(0);
+  const workoutStartedAtRef = useRef<number | null>(null);
 
   const stopWatch = useCallback(() => {
     if (intervalRef.current) {
@@ -85,6 +94,8 @@ export function useWorkoutTracker() {
     setCurrentSpeed(0);
     trackRef.current = EMPTY_TRACK;
     pausedAccumRef.current = 0;
+    strokeCountRef.current = 0;
+    workoutStartedAtRef.current = Date.now();
 
     await beginSegment();
   }, [beginSegment]);
@@ -106,7 +117,8 @@ export function useWorkoutTracker() {
     await beginSegment();
   }, [beginSegment]);
 
-  const finish = useCallback(() => {
+  // 끝난 운동 요약을 돌려준다(저장은 화면에서).
+  const finish = useCallback((): WorkoutSummary | null => {
     subscriptionRef.current?.remove();
     subscriptionRef.current = null;
     stopWatch();
@@ -117,10 +129,20 @@ export function useWorkoutTracker() {
     setElapsedSeconds(pausedAccumRef.current);
     setCurrentSpeed(0);
     setStatus('idle');
+    const workoutStartedAt = workoutStartedAtRef.current;
+    workoutStartedAtRef.current = null;
+    if (workoutStartedAt == null) return null;
+    return {
+      startedAt: workoutStartedAt,
+      distanceMeters: trackRef.current.distanceMeters,
+      durationSeconds: pausedAccumRef.current,
+      strokeCount: strokeCountRef.current,
+    };
   }, [stopWatch]);
 
   const logStroke = useCallback(() => {
-    setStrokeCount((c) => c + 1);
+    strokeCountRef.current += 1;
+    setStrokeCount(strokeCountRef.current);
   }, []);
 
   useEffect(() => {
