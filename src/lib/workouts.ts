@@ -28,6 +28,17 @@ export function parseDuration(text: string): number | null {
   return total > 0 ? total : null;
 }
 
+// 에르고 화면처럼 0.1초까지: 452.3 → "7:32.3", 3723.04 → "1:02:03.0"
+export function formatErgTime(totalSeconds: number) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '--:--';
+  const tenths = Math.round(totalSeconds * 10);
+  const h = Math.floor(tenths / 36000);
+  const m = Math.floor((tenths % 36000) / 600);
+  const s = Math.floor((tenths % 600) / 10);
+  const ss = `${String(s).padStart(2, '0')}.${tenths % 10}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 // 콘셉트2 공식: 와트 = 2.80 / (초/미터)^3
 export function concept2Watts(distanceMeters: number, durationSeconds: number): number {
   if (!(distanceMeters > 0) || !(durationSeconds > 0)) return 0;
@@ -64,10 +75,7 @@ export function normalizeRecords(raw: unknown): WorkoutRecord[] {
 
 // 이번 주(월요일 0시부터, 기기 시간대) 합계
 export function weekTotals(records: WorkoutRecord[], now = new Date()) {
-  const monday = new Date(now);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  const from = monday.getTime();
+  const from = mondayOf(now).getTime();
   let distanceMeters = 0;
   let durationSeconds = 0;
   let count = 0;
@@ -79,6 +87,48 @@ export function weekTotals(records: WorkoutRecord[], now = new Date()) {
     }
   }
   return { distanceMeters, durationSeconds, count };
+}
+
+function mondayOf(d: Date) {
+  const m = new Date(d);
+  m.setHours(0, 0, 0, 0);
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  return m;
+}
+
+// 최근 n주(이번 주 포함, 오래된 주 → 이번 주) 주별 거리 합계. weekStart는 그 주 월요일 0시.
+export function weeklyDistances(records: WorkoutRecord[], weeks = 8, now = new Date()) {
+  const starts: number[] = [];
+  const thisMonday = mondayOf(now);
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(thisMonday);
+    d.setDate(d.getDate() - 7 * i); // 날짜로 빼서 서머타임이 있어도 월요일 0시 유지
+    starts.push(d.getTime());
+  }
+  const totals = starts.map((weekStart) => ({ weekStart, distanceMeters: 0, count: 0 }));
+  const end = now.getTime();
+  for (const r of records) {
+    if (r.startedAt < starts[0] || r.startedAt > end) continue;
+    let i = starts.length - 1;
+    while (i > 0 && r.startedAt < starts[i]) i--;
+    totals[i].distanceMeters += r.distanceMeters;
+    totals[i].count += 1;
+  }
+  return totals;
+}
+
+// 에르고 표준 거리 최고 기록(거리가 정확히 같은 기록 중 가장 빠른 시간).
+export const STANDARD_ERG_DISTANCES = [500, 1000, 2000, 5000, 6000, 10000];
+
+export function ergBests(records: WorkoutRecord[]) {
+  const best = new Map<number, WorkoutRecord>();
+  for (const r of records) {
+    if (r.source !== 'erg' || !STANDARD_ERG_DISTANCES.includes(r.distanceMeters)) continue;
+    if (!(r.durationSeconds > 0)) continue;
+    const cur = best.get(r.distanceMeters);
+    if (!cur || r.durationSeconds < cur.durationSeconds) best.set(r.distanceMeters, r);
+  }
+  return STANDARD_ERG_DISTANCES.filter((d) => best.has(d)).map((d) => best.get(d)!);
 }
 
 // 너무 짧은 운동(실수로 시작→종료)은 저장하지 않는다.

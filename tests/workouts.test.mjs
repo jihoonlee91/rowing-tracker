@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   concept2Watts,
+  ergBests,
+  formatErgTime,
   isWorthSaving,
   normalizeRecords,
   parseDuration,
+  weeklyDistances,
   weekTotals,
 } from '../src/lib/workouts.ts';
 
@@ -51,6 +54,45 @@ test('이번 주 합계는 월요일 0시부터', () => {
     now
   );
   assert.deepEqual(t, { distanceMeters: 2000, durationSeconds: 450, count: 1 });
+});
+
+test('최근 8주 주별 거리: 주 경계(월 0시)·이번 주 미래·8주 이전 제외', () => {
+  const now = new Date(2026, 9, 14, 18); // 수요일
+  const rec = (id, d, m) => ({ id, source: 'erg', startedAt: d.getTime(), distanceMeters: m, durationSeconds: 100 });
+  const w = weeklyDistances(
+    [
+      rec('mon', new Date(2026, 9, 12, 0, 0), 2000), // 이번 주
+      rec('sun', new Date(2026, 9, 11, 23, 59), 5000), // 지난 주
+      rec('future', new Date(2026, 9, 15, 9), 9999), // 아직 안 온 시각
+      rec('old', new Date(2026, 7, 16, 12), 7777), // 8주 전 주 → 범위 밖
+      rec('first', new Date(2026, 7, 24, 8), 1000), // 8주 창의 첫 주 월요일
+    ],
+    8,
+    now
+  );
+  assert.equal(w.length, 8);
+  assert.equal(w[0].weekStart, new Date(2026, 7, 24).getTime());
+  assert.equal(w[7].weekStart, new Date(2026, 9, 12).getTime());
+  assert.deepEqual(w.map((x) => x.distanceMeters), [1000, 0, 0, 0, 0, 0, 5000, 2000]);
+  assert.equal(w[7].count, 1);
+});
+
+test('에르고 최고 기록: 표준 거리·에르고만, 가장 빠른 시간', () => {
+  const b = ergBests([
+    { id: 'a', source: 'erg', startedAt: 1, distanceMeters: 2000, durationSeconds: 460 },
+    { id: 'b', source: 'erg', startedAt: 2, distanceMeters: 2000, durationSeconds: 450.5 },
+    { id: 'c', source: 'gps', startedAt: 3, distanceMeters: 2000, durationSeconds: 300 },
+    { id: 'd', source: 'erg', startedAt: 4, distanceMeters: 1999, durationSeconds: 300 },
+    { id: 'e', source: 'erg', startedAt: 5, distanceMeters: 500, durationSeconds: 95 },
+  ]);
+  assert.deepEqual(b.map((r) => r.id), ['e', 'b']);
+});
+
+test('에르고 시간 표시는 0.1초까지', () => {
+  assert.equal(formatErgTime(452.3), '7:32.3');
+  assert.equal(formatErgTime(59.96), '1:00.0'); // 반올림이 분으로 넘어감
+  assert.equal(formatErgTime(3723.04), '1:02:03.0');
+  assert.equal(formatErgTime(NaN), '--:--');
 });
 
 test('실수로 바로 끈 운동은 저장 안 함', () => {

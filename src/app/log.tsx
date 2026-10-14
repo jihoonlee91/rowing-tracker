@@ -15,7 +15,10 @@ import { useWorkoutLog } from '../lib/useWorkoutLog';
 import {
   avgSpeed,
   concept2Watts,
+  ergBests,
+  formatErgTime,
   parseDuration,
+  weeklyDistances,
   weekTotals,
   type WorkoutRecord,
 } from '../lib/workouts';
@@ -56,6 +59,8 @@ export default function LogScreen() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const week = useMemo(() => weekTotals(records ?? []), [records]);
+  const weeks = useMemo(() => weeklyDistances(records ?? [], 8), [records]);
+  const bests = useMemo(() => ergBests(records ?? []), [records]);
 
   const distanceM = Number(distance);
   const seconds = parseDuration(time);
@@ -106,7 +111,25 @@ export default function LogScreen() {
                   {(week.distanceMeters / 1000).toFixed(1)} km · {formatDuration(week.durationSeconds)} ·{' '}
                   {week.count}회
                 </Text>
+                {weeks.some((w) => w.count > 0) && <WeeklyChart weeks={weeks} />}
               </View>
+
+              {bests.length > 0 && (
+                <View style={styles.weekCard}>
+                  <Text style={styles.weekLabel}>에르고 최고 기록</Text>
+                  {bests.map((b) => (
+                    <View key={b.distanceMeters} style={styles.bestRow}>
+                      <Text style={styles.bestDist}>
+                        {b.distanceMeters >= 1000 ? `${b.distanceMeters / 1000}k` : `${b.distanceMeters}m`}
+                      </Text>
+                      <Text style={styles.bestTime}>{formatErgTime(b.durationSeconds)}</Text>
+                      <Text style={styles.bestSub}>
+                        {formatPacePer500m(avgSpeed(b))} /500m · {formatDate(b.startedAt)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
 
               <View style={styles.form}>
                 <Text style={styles.formTitle}>에르고 기록 입력</Text>
@@ -153,6 +176,46 @@ export default function LogScreen() {
   );
 }
 
+// 최근 8주 주별 거리 막대(라이브러리 없이 View로). 막대 위는 km, 아래는 그 주 월요일 날짜.
+function WeeklyChart({ weeks }: { weeks: { weekStart: number; distanceMeters: number; count: number }[] }) {
+  const max = Math.max(...weeks.map((w) => w.distanceMeters), 1);
+  const summary = weeks
+    .map((w) => `${formatShortDate(w.weekStart)} 주 ${(w.distanceMeters / 1000).toFixed(1)}km`)
+    .join(', ');
+  return (
+    <View style={styles.chart} accessible accessibilityLabel={`최근 8주 거리: ${summary}`}>
+      {weeks.map((w, i) => {
+        const km = w.distanceMeters / 1000;
+        const isThisWeek = i === weeks.length - 1;
+        return (
+          <View key={w.weekStart} style={styles.chartCol}>
+            <Text style={styles.chartValue} numberOfLines={1}>
+              {w.distanceMeters > 0 ? (km >= 10 ? km.toFixed(0) : km.toFixed(1)) : ''}
+            </Text>
+            <View style={styles.chartTrack}>
+              <View
+                style={[
+                  styles.chartBar,
+                  { height: `${Math.max((w.distanceMeters / max) * 100, w.distanceMeters > 0 ? 4 : 0)}%` },
+                  isThisWeek && styles.chartBarNow,
+                ]}
+              />
+            </View>
+            <Text style={styles.chartLabel} numberOfLines={1}>
+              {formatShortDate(w.weekStart)}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function formatShortDate(ms: number) {
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 function RecordRow({
   record,
   confirming,
@@ -175,7 +238,8 @@ function RecordRow({
           {formatDate(record.startedAt)} · {isErg ? '에르고' : '수상(GPS)'}
         </Text>
         <Text style={styles.recordMain}>
-          {Math.round(record.distanceMeters).toLocaleString()} m · {formatDuration(record.durationSeconds)}
+          {Math.round(record.distanceMeters).toLocaleString()} m ·{' '}
+          {isErg ? formatErgTime(record.durationSeconds) : formatDuration(record.durationSeconds)}
         </Text>
         <Text style={styles.recordSub}>{details.join(' · ')}</Text>
       </View>
@@ -223,6 +287,17 @@ const styles = StyleSheet.create({
   weekCard: { backgroundColor: '#122d4a', borderRadius: 16, padding: 16, marginBottom: 12 },
   weekLabel: { color: '#8fa8c4', fontSize: 13 },
   weekValue: { color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 4 },
+  chart: { flexDirection: 'row', gap: 4, marginTop: 12, height: 120 },
+  chartCol: { flex: 1, alignItems: 'center', minWidth: 0 },
+  chartValue: { color: '#c7d6e6', fontSize: 10, height: 14 },
+  chartTrack: { flex: 1, width: '100%', justifyContent: 'flex-end' },
+  chartBar: { backgroundColor: '#3b6ea5', borderRadius: 4, width: '100%' },
+  chartBarNow: { backgroundColor: '#2f7cf6' },
+  chartLabel: { color: '#8fa8c4', fontSize: 10, marginTop: 4 },
+  bestRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 8, gap: 10 },
+  bestDist: { color: '#8fa8c4', fontSize: 14, width: 44 },
+  bestTime: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  bestSub: { color: '#c7d6e6', fontSize: 12, flexShrink: 1 },
   form: { backgroundColor: '#122d4a', borderRadius: 16, padding: 16, marginBottom: 16 },
   formTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 8 },
   row: { flexDirection: 'row', gap: 10 },
