@@ -1,15 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
+import { mergeImported } from './csv';
 import { normalizeRecords, type WorkoutRecord } from './workouts';
 
 const STORAGE_KEY = 'rowing-tracker:workouts:v1';
 
-async function readAll(): Promise<WorkoutRecord[]> {
+// strict면 저장된 값이 깨졌을 때 빈 목록 대신 오류를 낸다(쓰기 전에 읽을 때 — 깨진 원본을 덮어써 지우지 않도록).
+async function readAll(strict = false): Promise<WorkoutRecord[]> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
   try {
     return normalizeRecords(JSON.parse(raw));
-  } catch {
+  } catch (e) {
+    if (strict) throw e;
     return [];
   }
 }
@@ -25,7 +28,7 @@ const listeners = new Set<(records: WorkoutRecord[]) => void>();
 let queue: Promise<unknown> = Promise.resolve();
 function mutate(fn: (records: WorkoutRecord[]) => WorkoutRecord[]) {
   const run = queue.then(async () => {
-    const next = normalizeRecords(fn(await readAll()));
+    const next = normalizeRecords(fn(await readAll(true)));
     await writeAll(next);
     listeners.forEach((l) => l(next));
     return next;
@@ -58,5 +61,16 @@ export function useWorkoutLog() {
     []
   );
 
-  return { records, addWorkout, removeWorkout };
+  // CSV에서 읽은 기록을 더한다(이미 있는 기록은 건너뜀). 더한 개수를 돌려준다.
+  const importWorkouts = useCallback(async (incoming: WorkoutRecord[]) => {
+    let added = 0;
+    await mutate((prev) => {
+      const r = mergeImported(prev, incoming);
+      added = r.added;
+      return r.merged;
+    });
+    return added;
+  }, []);
+
+  return { records, addWorkout, removeWorkout, importWorkouts };
 }

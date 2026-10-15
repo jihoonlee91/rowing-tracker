@@ -4,12 +4,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { csvToRecords, recordsToCsv } from '../lib/csv';
 import { formatDuration, formatPacePer500m } from '../lib/geo';
 import { useWorkoutLog } from '../lib/useWorkoutLog';
 import {
@@ -50,7 +52,7 @@ function formatDate(ms: number) {
 }
 
 export default function LogScreen() {
-  const { records, addWorkout, removeWorkout } = useWorkoutLog();
+  const { records, addWorkout, removeWorkout, importWorkouts } = useWorkoutLog();
   const [distance, setDistance] = useState('');
   const [time, setTime] = useState('');
   const [spm, setSpm] = useState('');
@@ -156,6 +158,7 @@ export default function LogScreen() {
               {records ? '아직 기록이 없어요. 트래커에서 운동을 마치거나 에르고 기록을 입력하세요.' : '불러오는 중…'}
             </Text>
           }
+          ListFooterComponent={<BackupCard records={records ?? []} onImport={importWorkouts} />}
           renderItem={({ item }) => (
             <RecordRow
               record={item}
@@ -207,6 +210,112 @@ function WeeklyChart({ weeks }: { weeks: { weekStart: number; distanceMeters: nu
           </View>
         );
       })}
+    </View>
+  );
+}
+
+// 기록 백업(CSV 내보내기)과 가져오기(이 앱 CSV 또는 콘셉트2 로그북 CSV를 붙여넣기).
+function BackupCard({
+  records,
+  onImport,
+}: {
+  records: WorkoutRecord[];
+  onImport: (records: WorkoutRecord[]) => Promise<number>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+
+  const exportCsv = async () => {
+    const csv = recordsToCsv(records);
+    const d = new Date();
+    const name = `rowing-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.csv`;
+    try {
+      if (Platform.OS === 'web') {
+        // 엑셀에서 한글이 깨지지 않게 BOM을 붙인다(가져오기는 BOM을 무시).
+        const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } else {
+        await Share.share({ title: name, message: csv });
+      }
+      setMessage(`${records.length}개 기록을 CSV로 내보냈어요.`);
+    } catch {
+      setMessage('내보내기에 실패했어요.');
+    }
+  };
+
+  const importCsv = async () => {
+    const parsed = csvToRecords(text);
+    if (!parsed.format) {
+      setMessage('읽을 수 있는 CSV가 아니에요. 이 앱에서 내보낸 CSV나 콘셉트2 로그북 CSV를 붙여넣어 주세요.');
+      return;
+    }
+    try {
+      const added = await onImport(parsed.records);
+      const dup = parsed.records.length - added;
+      setMessage(
+        `${added}개 가져옴` +
+          (dup > 0 ? ` · 이미 있는 ${dup}개 건너뜀` : '') +
+          (parsed.skipped > 0 ? ` · ${parsed.skipped}줄 제외(형식 오류·RowErg 아님)` : '')
+      );
+      if (added > 0 || dup > 0) setText('');
+    } catch {
+      setMessage('가져오기에 실패했어요(기존 기록은 그대로예요).');
+    }
+  };
+
+  return (
+    <View style={[styles.form, { marginTop: 8 }]}>
+      <Text style={styles.formTitle}>백업 · 가져오기</Text>
+      <View style={styles.row}>
+        <Pressable
+          style={[styles.secondaryButton, records.length === 0 && { opacity: 0.5 }]}
+          onPress={exportCsv}
+          disabled={records.length === 0}
+          accessibilityRole="button"
+        >
+          <Text style={styles.secondaryButtonText}>CSV 내보내기</Text>
+        </Pressable>
+        <Pressable
+          style={styles.secondaryButton}
+          onPress={() => setOpen((o) => !o)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+        >
+          <Text style={styles.secondaryButtonText}>{open ? '가져오기 닫기' : 'CSV 가져오기'}</Text>
+        </Pressable>
+      </View>
+      {open && (
+        <View style={{ marginTop: 10 }}>
+          <Text style={styles.fieldLabel}>
+            이 앱에서 내보낸 CSV, 또는 콘셉트2 로그북(log.concept2.com)에서 내려받은 CSV 내용을 붙여넣으세요. 이미 있는 기록은 건너뜁니다.
+          </Text>
+          <TextInput
+            style={[styles.input, styles.csvInput]}
+            value={text}
+            onChangeText={setText}
+            multiline
+            placeholder="date,source,distance_m,time_s,…"
+            placeholderTextColor="#5d7896"
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="가져올 CSV"
+          />
+          <Pressable
+            style={[styles.saveButton, !text.trim() && { opacity: 0.5 }]}
+            onPress={importCsv}
+            disabled={!text.trim()}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveButtonText}>가져오기</Text>
+          </Pressable>
+        </View>
+      )}
+      {message && <Text style={[styles.preview, { marginTop: 8, marginBottom: 0 }]}>{message}</Text>}
     </View>
   );
 }
@@ -316,6 +425,16 @@ const styles = StyleSheet.create({
   error: { color: '#ffb4b4', marginBottom: 8 },
   saveButton: { backgroundColor: '#2f7cf6', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  secondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#3b6ea5',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  secondaryButtonText: { color: '#c7d6e6', fontSize: 15, fontWeight: '600' },
+  csvInput: { minHeight: 120, maxHeight: 240, marginVertical: 10, fontSize: 13, textAlignVertical: 'top' },
   sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 8 },
   empty: { color: '#8fa8c4', textAlign: 'center', marginTop: 16 },
   record: {
