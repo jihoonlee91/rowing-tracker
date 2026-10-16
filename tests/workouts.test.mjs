@@ -3,10 +3,13 @@ import { test } from 'node:test';
 import {
   concept2Watts,
   ergBests,
+  ergPaceTrend,
   formatErgTime,
   isWorthSaving,
   normalizeRecords,
+  parseDistance,
   parseDuration,
+  trendDistances,
   weeklyDistances,
   weekTotals,
 } from '../src/lib/workouts.ts';
@@ -93,6 +96,36 @@ test('에르고 시간 표시는 0.1초까지', () => {
   assert.equal(formatErgTime(59.96), '1:00.0'); // 반올림이 분으로 넘어감
   assert.equal(formatErgTime(3723.04), '1:02:03.0');
   assert.equal(formatErgTime(NaN), '--:--');
+});
+
+test('거리 입력: 쉼표·k·km 허용, 틀린 형식은 null', () => {
+  assert.equal(parseDistance('2000'), 2000);
+  assert.equal(parseDistance(' 2,000 '), 2000);
+  assert.equal(parseDistance('2k'), 2000);
+  assert.equal(parseDistance('2.5K'), 2500);
+  assert.equal(parseDistance('5 km'), 5000);
+  assert.equal(parseDistance('6000m'), 6000);
+  assert.equal(parseDistance('0'), null);
+  assert.equal(parseDistance('2k2'), null);
+  assert.equal(parseDistance(''), null);
+  assert.equal(parseDistance('-500'), null);
+  assert.equal(parseDistance('300k'), null);
+});
+
+test('페이스 추이: 같은 거리 에르고만, 오래된→최근, 최근 limit개', () => {
+  const rec = (id, startedAt, d, s, source = 'erg') => ({ id, source, startedAt, distanceMeters: d, durationSeconds: s });
+  const records = [
+    rec('c', 30, 2000, 440),
+    rec('a', 10, 2000, 480),
+    rec('b', 20, 2000, 460),
+    rec('g', 25, 2000, 300, 'gps'),
+    rec('x', 15, 5000, 1200),
+  ];
+  const t = ergPaceTrend(records, 2000);
+  assert.deepEqual(t.map((p) => p.id), ['a', 'b', 'c']);
+  assert.equal(t[0].paceSeconds, 120);
+  assert.deepEqual(ergPaceTrend(records, 2000, 2).map((p) => p.id), ['b', 'c']);
+  assert.deepEqual(trendDistances(records), [2000]); // 5k는 1개뿐
 });
 
 test('실수로 바로 끈 운동은 저장 안 함', () => {

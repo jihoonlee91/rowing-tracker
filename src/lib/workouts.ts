@@ -131,6 +131,33 @@ export function ergBests(records: WorkoutRecord[]) {
   return STANDARD_ERG_DISTANCES.filter((d) => best.has(d)).map((d) => best.get(d)!);
 }
 
+// 같은 표준 거리 에르고 기록의 /500m 페이스(초) 추이, 오래된 → 최근. 최근 limit개만.
+export function ergPaceTrend(records: WorkoutRecord[], distanceMeters: number, limit = 12) {
+  return records
+    .filter((r) => r.source === 'erg' && r.distanceMeters === distanceMeters && r.durationSeconds > 0)
+    .sort((a, b) => a.startedAt - b.startedAt)
+    .slice(-limit)
+    .map((r) => ({ id: r.id, startedAt: r.startedAt, paceSeconds: (r.durationSeconds / r.distanceMeters) * 500 }));
+}
+
+// 추이를 그릴 수 있는(에르고 기록이 2개 이상인) 표준 거리
+export function trendDistances(records: WorkoutRecord[]) {
+  const count = new Map<number, number>();
+  for (const r of records) {
+    if (r.source === 'erg' && r.durationSeconds > 0) count.set(r.distanceMeters, (count.get(r.distanceMeters) ?? 0) + 1);
+  }
+  return STANDARD_ERG_DISTANCES.filter((d) => (count.get(d) ?? 0) >= 2);
+}
+
+// 거리 입력: "2000", "2,000", "2k", "2.5k", "5 km", "6000m" → 미터. 형식이 틀리거나 0 이하·200km 초과면 null.
+export function parseDistance(text: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)\s*(k|km|m)?$/i.exec(text.trim().replace(/,/g, ''));
+  if (!m) return null;
+  const meters = Number(m[1]) * (m[2] && m[2].toLowerCase() !== 'm' ? 1000 : 1);
+  const rounded = Math.round(meters * 10) / 10;
+  return rounded > 0 && rounded <= 200000 ? rounded : null;
+}
+
 // 너무 짧은 운동(실수로 시작→종료)은 저장하지 않는다.
 export function isWorthSaving(distanceMeters: number, durationSeconds: number) {
   return durationSeconds >= 30 || distanceMeters >= 50;

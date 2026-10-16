@@ -18,8 +18,11 @@ import {
   avgSpeed,
   concept2Watts,
   ergBests,
+  ergPaceTrend,
   formatErgTime,
+  parseDistance,
   parseDuration,
+  trendDistances,
   weeklyDistances,
   weekTotals,
   type WorkoutRecord,
@@ -64,7 +67,9 @@ export default function LogScreen() {
   const weeks = useMemo(() => weeklyDistances(records ?? [], 8), [records]);
   const bests = useMemo(() => ergBests(records ?? []), [records]);
 
-  const distanceM = Number(distance);
+  const trendOptions = useMemo(() => trendDistances(records ?? []), [records]);
+
+  const distanceM = parseDistance(distance) ?? 0;
   const seconds = parseDuration(time);
   const preview =
     distanceM > 0 && seconds
@@ -72,11 +77,12 @@ export default function LogScreen() {
       : null;
 
   const submit = async () => {
-    if (!(distanceM > 0)) return setError('거리(m)를 입력해주세요.');
+    if (!(distanceM > 0)) return setError('거리를 2000 또는 2k처럼 입력해주세요.');
     if (!seconds) return setError('시간을 7:30.5 또는 1:02:03처럼 입력해주세요.');
     const startedAt = parseDate(date);
     if (startedAt == null) return setError('날짜를 2026-10-14처럼 입력해주세요(미래 날짜는 안 돼요).');
-    const rate = Number(spm);
+    const rate = spm.trim() ? Number(spm) : 0;
+    if (spm.trim() && !(rate >= 10 && rate <= 60)) return setError('평균 spm은 10~60 사이로 입력해주세요(비워도 돼요).');
     setError(null);
     try {
       await addWorkout({
@@ -133,10 +139,12 @@ export default function LogScreen() {
                 </View>
               )}
 
+              {trendOptions.length > 0 && <PaceTrendCard records={records ?? []} options={trendOptions} />}
+
               <View style={styles.form}>
                 <Text style={styles.formTitle}>에르고 기록 입력</Text>
                 <View style={styles.row}>
-                  <Field label="거리 (m)" value={distance} onChange={setDistance} placeholder="2000" numeric />
+                  <Field label="거리 (m, 2k도 돼요)" value={distance} onChange={setDistance} placeholder="2000" />
                   <Field label="시간" value={time} onChange={setTime} placeholder="7:30.5" />
                 </View>
                 <View style={styles.row}>
@@ -210,6 +218,73 @@ function WeeklyChart({ weeks }: { weeks: { weekStart: number; distanceMeters: nu
           </View>
         );
       })}
+    </View>
+  );
+}
+
+// 같은 표준 거리 에르고 기록의 /500m 페이스 추이(점 그래프, 빠를수록 위). 거리는 칩으로 고른다.
+function PaceTrendCard({ records, options }: { records: WorkoutRecord[]; options: number[] }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const dist = picked != null && options.includes(picked) ? picked : options.includes(2000) ? 2000 : options[0];
+  const points = useMemo(() => ergPaceTrend(records, dist), [records, dist]);
+  const paces = points.map((p) => p.paceSeconds);
+  const fast = Math.min(...paces);
+  const slow = Math.max(...paces);
+  const range = slow - fast;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const diff = last.paceSeconds - first.paceSeconds;
+  const change =
+    Math.abs(diff) < 0.05
+      ? '첫 기록과 같은 페이스'
+      : `첫 기록보다 ${Math.abs(diff).toFixed(1)}초 ${diff < 0 ? '빠름' : '느림'}`;
+  const label = (d: number) => (d >= 1000 ? `${d / 1000}k` : `${d}m`);
+  const pace = (s: number) => formatPacePer500m(500 / s);
+  return (
+    <View style={styles.weekCard}>
+      <Text style={styles.weekLabel}>에르고 페이스 추이 (/500m)</Text>
+      <View style={styles.chipRow}>
+        {options.map((d) => (
+          <Pressable
+            key={d}
+            onPress={() => setPicked(d)}
+            style={[styles.chip, d === dist && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: d === dist }}
+          >
+            <Text style={[styles.chipText, d === dist && styles.chipTextOn]}>{label(d)}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.trendSummary}>
+        최근 {pace(last.paceSeconds)} · {change}
+      </Text>
+      <View
+        style={styles.chart}
+        accessible
+        accessibilityLabel={`${label(dist)} 페이스 추이: ${points
+          .map((p) => `${formatShortDate(p.startedAt)} ${pace(p.paceSeconds)}`)
+          .join(', ')}`}
+      >
+        {points.map((p, i) => {
+          // 가장 빠른 기록이 위(92%), 가장 느린 기록이 아래(8%). 모두 같으면 가운데.
+          const y = range > 0 ? 8 + ((slow - p.paceSeconds) / range) * 84 : 50;
+          const isBest = p.paceSeconds === fast;
+          return (
+            <View key={p.id} style={styles.chartCol}>
+              <View style={styles.chartTrack}>
+                <View style={[styles.dot, { bottom: `${y}%` }, isBest && styles.dotBest]} />
+              </View>
+              <Text style={styles.chartLabel} numberOfLines={1}>
+                {i === 0 || i === points.length - 1 || points.length <= 6 ? formatShortDate(p.startedAt) : ''}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={styles.chartLabel}>
+        가장 빠름 {pace(fast)} · 가장 느림 {pace(slow)} · {points.length}회
+      </Text>
     </View>
   );
 }
@@ -403,6 +478,22 @@ const styles = StyleSheet.create({
   chartBar: { backgroundColor: '#3b6ea5', borderRadius: 4, width: '100%' },
   chartBarNow: { backgroundColor: '#2f7cf6' },
   chartLabel: { color: '#8fa8c4', fontSize: 10, marginTop: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  chip: { borderWidth: 1, borderColor: '#3b6ea5', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  chipOn: { backgroundColor: '#2f7cf6', borderColor: '#2f7cf6' },
+  chipText: { color: '#c7d6e6', fontSize: 13 },
+  chipTextOn: { color: '#fff', fontWeight: '700' },
+  trendSummary: { color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 10 },
+  dot: {
+    position: 'absolute',
+    alignSelf: 'center',
+    width: 10,
+    height: 10,
+    marginBottom: -5,
+    borderRadius: 5,
+    backgroundColor: '#3b6ea5',
+  },
+  dotBest: { backgroundColor: '#9fd8a8' },
   bestRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 8, gap: 10 },
   bestDist: { color: '#8fa8c4', fontSize: 14, width: 44 },
   bestTime: { color: '#fff', fontSize: 18, fontWeight: '700' },
