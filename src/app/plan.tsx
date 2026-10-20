@@ -18,12 +18,26 @@ import {
   Weekday,
   useTrainingPlan,
 } from '../lib/trainingPlan';
+import { isDoneThisWeek, parseTarget, planWeekSummary, weekActualsByDay, weekdayOf } from '../lib/planWeek';
+import { useWorkoutLog } from '../lib/useWorkoutLog';
 
 const SESSION_TYPES = Object.keys(SESSION_TYPE_LABEL) as SessionType[];
 
+function formatMinutes(seconds: number) {
+  const min = Math.round(seconds / 60);
+  return min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : `${min}분`;
+}
+
 export default function PlanScreen() {
   const { sessions, addSession, toggleDone, removeSession } = useTrainingPlan();
+  const { records } = useWorkoutLog();
   const [modalVisible, setModalVisible] = useState(false);
+
+  // 화면을 연 시각 기준 이번 주(월~일)
+  const now = new Date();
+  const today = weekdayOf(now.getTime());
+  const actuals = useMemo(() => weekActualsByDay(records ?? []), [records]);
+  const summary = useMemo(() => planWeekSummary(sessions ?? [], records ?? []), [sessions, records]);
 
   const grouped = useMemo(() => {
     const map = new Map<Weekday, TrainingSession[]>();
@@ -37,29 +51,65 @@ export default function PlanScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.listContent}>
+        {summary.planned > 0 && (
+          <View style={styles.summaryCard} accessibilityRole="summary">
+            <Text style={styles.summaryTitle}>이번 주</Text>
+            <Text style={styles.summaryMain}>
+              {summary.planned}개 중 {summary.done}개 완료
+            </Text>
+            <Text style={styles.summaryMeta}>
+              실제 {(summary.actualMeters / 1000).toFixed(1)} km
+              {summary.targetMeters > 0 ? ` / 목표 ${(summary.targetMeters / 1000).toFixed(1)} km` : ''}
+            </Text>
+            {summary.targetMeters > 0 && (
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${Math.min(100, (summary.actualMeters / summary.targetMeters) * 100)}%` },
+                  ]}
+                />
+              </View>
+            )}
+          </View>
+        )}
         {WEEKDAYS.map((day) => {
           const daySessions = grouped.get(day) ?? [];
+          const actual = actuals.get(day);
           return (
             <View key={day} style={styles.daySection}>
-              <Text style={styles.dayLabel}>{day}요일</Text>
+              <View style={styles.dayHeader}>
+                <Text style={[styles.dayLabel, day === today && styles.dayLabelToday]}>
+                  {day}요일{day === today ? ' · 오늘' : ''}
+                </Text>
+                {!!actual?.count && (
+                  <Text style={styles.dayActual}>
+                    기록 {(actual.distanceMeters / 1000).toFixed(1)} km · {formatMinutes(actual.durationSeconds)}
+                  </Text>
+                )}
+              </View>
               {daySessions.length === 0 ? (
                 <Text style={styles.emptyDay}>계획 없음</Text>
               ) : (
-                daySessions.map((session) => (
+                daySessions.map((session) => {
+                  const done = isDoneThisWeek(session, now);
+                  return (
                   <Pressable
                     key={session.id}
-                    style={[styles.card, session.done && styles.cardDone]}
+                    style={[styles.card, done && styles.cardDone]}
                     onPress={() => toggleDone(session.id)}
                     onLongPress={() => removeSession(session.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: done }}
                   >
                     <View style={styles.cardRow}>
                       <Ionicons
-                        name={session.done ? 'checkmark-circle' : 'ellipse-outline'}
+                        name={done ? 'checkmark-circle' : 'ellipse-outline'}
                         size={20}
-                        color={session.done ? '#2fbf71' : '#8fa8c4'}
+                        color={done ? '#2fbf71' : '#8fa8c4'}
                       />
                       <View style={styles.cardBody}>
-                        <Text style={[styles.cardTitle, session.done && styles.cardTitleDone]}>
+                        <Text style={[styles.cardTitle, done && styles.cardTitleDone]}>
                           {session.title}
                         </Text>
                         <Text style={styles.cardMeta}>
@@ -71,12 +121,15 @@ export default function PlanScreen() {
                       </View>
                     </View>
                   </Pressable>
-                ))
+                  );
+                })
               )}
             </View>
           );
         })}
-        <Text style={styles.hint}>길게 눌러서 삭제할 수 있어요.</Text>
+        <Text style={styles.hint}>
+          눌러서 완료 표시(다음 주 월요일에 다시 할 일로), 길게 눌러서 삭제할 수 있어요.
+        </Text>
       </ScrollView>
 
       <Pressable style={styles.fab} onPress={() => setModalVisible(true)}>
@@ -212,8 +265,8 @@ function AddSessionModal({
                     day,
                     type,
                     title: title.trim(),
-                    targetDistanceKm: distance ? Number(distance) : undefined,
-                    targetDurationMin: duration ? Number(duration) : undefined,
+                    targetDistanceKm: parseTarget(distance),
+                    targetDurationMin: parseTarget(duration),
                     notes: notes.trim() || undefined,
                   });
                   reset();
@@ -241,11 +294,59 @@ const styles = StyleSheet.create({
   daySection: {
     marginBottom: 20,
   },
+  summaryCard: {
+    backgroundColor: '#122d4a',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+  },
+  summaryTitle: {
+    color: '#8fa8c4',
+    fontSize: 12,
+  },
+  summaryMain: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  summaryMeta: {
+    color: '#8fa8c4',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0b1f33',
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#2fbf71',
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
   dayLabel: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 8,
+  },
+  dayLabelToday: {
+    color: '#5aa2ff',
+  },
+  dayActual: {
+    color: '#2fbf71',
+    fontSize: 12,
+    fontWeight: '600',
   },
   emptyDay: {
     color: '#5b7290',

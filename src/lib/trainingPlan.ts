@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
+import { isDoneThisWeek, normalizeSessions } from './planWeek';
 
 const STORAGE_KEY = 'rowing-tracker:training-plan:v1';
 
@@ -25,14 +26,18 @@ export type TrainingSession = {
   targetDurationMin?: number;
   notes?: string;
   done: boolean;
+  // 완료로 체크한 시각(epoch ms). 그 주에만 완료로 보인다. 이전 형식에는 없다.
+  doneAt?: number;
 };
 
 async function readAll(): Promise<TrainingSession[]> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as TrainingSession[];
+    return normalizeSessions(JSON.parse(raw));
   } catch {
+    // 깨진 원본은 다음 저장이 덮어쓰기 전에 따로 보관한다.
+    await AsyncStorage.setItem(`${STORAGE_KEY}:broken-${Date.now()}`, raw);
     return [];
   }
 }
@@ -63,7 +68,13 @@ export function useTrainingPlan() {
   const toggleDone = useCallback(async (id: string) => {
     setSessions((prev) => {
       if (!prev) return prev;
-      const next = prev.map((s) => (s.id === id ? { ...s, done: !s.done } : s));
+      const next = prev.map((s) =>
+        s.id === id
+          ? isDoneThisWeek(s)
+            ? { ...s, done: false, doneAt: undefined }
+            : { ...s, done: true, doneAt: Date.now() }
+          : s
+      );
       writeAll(next);
       return next;
     });
