@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
-import { isDoneThisWeek, normalizeSessions } from './planWeek';
+import { type SessionFields, applySessionEdit, isDoneThisWeek, normalizeSessions } from './planWeek';
 
 const STORAGE_KEY = 'rowing-tracker:training-plan:v1';
 
@@ -80,6 +80,15 @@ export function useTrainingPlan() {
     });
   }, []);
 
+  const updateSession = useCallback(async (id: string, fields: SessionFields) => {
+    setSessions((prev) => {
+      if (!prev) return prev;
+      const next = applySessionEdit(prev, id, fields);
+      writeAll(next);
+      return next;
+    });
+  }, []);
+
   const removeSession = useCallback(async (id: string) => {
     setSessions((prev) => {
       if (!prev) return prev;
@@ -89,5 +98,5 @@ export function useTrainingPlan() {
     });
   }, []);
 
-  return { sessions, addSession, toggleDone, removeSession };
+  return { sessions, addSession, updateSession, toggleDone, removeSession };
 }

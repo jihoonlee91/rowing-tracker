@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  applySessionEdit,
   isDoneThisWeek,
   normalizeSessions,
   parseTarget,
@@ -74,4 +75,25 @@ test('저장된 계획 읽기: 깨진 항목 버리고 모르는 필드 보존',
   assert.equal(out[0].extra, 1);
   assert.equal(out[1].done, false);
   assert.deepEqual(normalizeSessions('nope'), []);
+});
+
+test('세션 수정: 칸만 바꾸고 id·완료·모르는 필드 유지, 비운 칸은 지움', () => {
+  const sessions = [
+    { id: 'a', day: '월', type: 'steady', title: '지속주', targetDistanceKm: 6, notes: '천천히', done: true, doneAt: at(20), future: 1 },
+    { id: 'b', day: '수', type: 'erg', title: '2k', done: false },
+  ];
+  const next = applySessionEdit(sessions, 'a', { day: '화', type: 'interval', title: '인터벌 4x500', targetDurationMin: 30 });
+  assert.equal(next[0].id, 'a');
+  assert.equal(next[0].day, '화');
+  assert.equal(next[0].type, 'interval');
+  assert.equal(next[0].title, '인터벌 4x500');
+  assert.equal(next[0].targetDurationMin, 30);
+  assert.equal(next[0].done, true);
+  assert.equal(next[0].doneAt, at(20));
+  assert.equal(next[0].future, 1);
+  const saved = JSON.parse(JSON.stringify(next[0]));
+  assert.equal('targetDistanceKm' in saved, false);
+  assert.equal('notes' in saved, false);
+  assert.deepEqual(next[1], sessions[1]);
+  assert.equal(sessions[0].day, '월'); // 원본 배열은 그대로
 });

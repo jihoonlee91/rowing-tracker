@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -18,7 +18,7 @@ import {
   Weekday,
   useTrainingPlan,
 } from '../lib/trainingPlan';
-import { isDoneThisWeek, parseTarget, planWeekSummary, weekActualsByDay, weekdayOf } from '../lib/planWeek';
+import { type SessionFields, isDoneThisWeek, parseTarget, planWeekSummary, weekActualsByDay, weekdayOf } from '../lib/planWeek';
 import { useWorkoutLog } from '../lib/useWorkoutLog';
 
 const SESSION_TYPES = Object.keys(SESSION_TYPE_LABEL) as SessionType[];
@@ -29,9 +29,19 @@ function formatMinutes(seconds: number) {
 }
 
 export default function PlanScreen() {
-  const { sessions, addSession, toggleDone, removeSession } = useTrainingPlan();
+  const { sessions, addSession, updateSession, toggleDone, removeSession } = useTrainingPlan();
   const { records } = useWorkoutLog();
   const [modalVisible, setModalVisible] = useState(false);
+  // 수정 중인 세션(없으면 새로 추가)
+  const [editing, setEditing] = useState<TrainingSession | null>(null);
+  const openEdit = (session: TrainingSession) => {
+    setEditing(session);
+    setModalVisible(true);
+  };
+  const closeModal = () => {
+    setModalVisible(false);
+    setEditing(null);
+  };
 
   // 화면을 연 시각 기준 이번 주(월~일)
   const now = new Date();
@@ -98,9 +108,10 @@ export default function PlanScreen() {
                     key={session.id}
                     style={[styles.card, done && styles.cardDone]}
                     onPress={() => toggleDone(session.id)}
-                    onLongPress={() => removeSession(session.id)}
+                    onLongPress={() => openEdit(session)}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: done }}
+                    accessibilityLabel={session.title}
                   >
                     <View style={styles.cardRow}>
                       <Ionicons
@@ -119,6 +130,15 @@ export default function PlanScreen() {
                         </Text>
                         {!!session.notes && <Text style={styles.cardNotes}>{session.notes}</Text>}
                       </View>
+                      <Pressable
+                        style={styles.editButton}
+                        onPress={() => openEdit(session)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${session.title} 수정`}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#8fa8c4" />
+                      </Pressable>
                     </View>
                   </Pressable>
                   );
@@ -128,34 +148,52 @@ export default function PlanScreen() {
           );
         })}
         <Text style={styles.hint}>
-          눌러서 완료 표시(다음 주 월요일에 다시 할 일로), 길게 눌러서 삭제할 수 있어요.
+          눌러서 완료 표시(다음 주 월요일에 다시 할 일로), 연필(또는 길게 누르기)로 수정·삭제할 수 있어요.
         </Text>
       </ScrollView>
 
-      <Pressable style={styles.fab} onPress={() => setModalVisible(true)}>
+      <Pressable
+        style={styles.fab}
+        onPress={() => {
+          setEditing(null);
+          setModalVisible(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="훈련 세션 추가"
+      >
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
 
-      <AddSessionModal
+      <SessionModal
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        onSubmit={async (session) => {
-          await addSession(session);
-          setModalVisible(false);
+        editing={editing}
+        onClose={closeModal}
+        onSubmit={async (fields) => {
+          if (editing) await updateSession(editing.id, fields);
+          else await addSession(fields);
+          closeModal();
+        }}
+        onDelete={async () => {
+          if (editing) await removeSession(editing.id);
+          closeModal();
         }}
       />
     </SafeAreaView>
   );
 }
 
-function AddSessionModal({
+function SessionModal({
   visible,
+  editing,
   onClose,
   onSubmit,
+  onDelete,
 }: {
   visible: boolean;
+  editing: TrainingSession | null;
   onClose: () => void;
-  onSubmit: (session: Omit<TrainingSession, 'id' | 'done'>) => void;
+  onSubmit: (fields: SessionFields) => void;
+  onDelete: () => void;
 }) {
   const [day, setDay] = useState<Weekday>('월');
   const [type, setType] = useState<SessionType>('steady');
@@ -163,22 +201,27 @@ function AddSessionModal({
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
   const [notes, setNotes] = useState('');
+  // 삭제는 두 번 눌러 확인(웹에서는 Alert 버튼이 안 뜬다)
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const reset = () => {
-    setDay('월');
-    setType('steady');
-    setTitle('');
-    setDistance('');
-    setDuration('');
-    setNotes('');
-  };
+  // 열 때마다 수정할 세션 값(없으면 빈 칸)으로 채운다.
+  useEffect(() => {
+    if (!visible) return;
+    setDay(editing?.day ?? '월');
+    setType(editing?.type ?? 'steady');
+    setTitle(editing?.title ?? '');
+    setDistance(editing?.targetDistanceKm != null ? String(editing.targetDistanceKm) : '');
+    setDuration(editing?.targetDurationMin != null ? String(editing.targetDurationMin) : '');
+    setNotes(editing?.notes ?? '');
+    setConfirmDelete(false);
+  }, [visible, editing]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <ScrollView>
-            <Text style={styles.modalTitle}>훈련 세션 추가</Text>
+            <Text style={styles.modalTitle}>{editing ? '훈련 세션 수정' : '훈련 세션 추가'}</Text>
 
             <Text style={styles.fieldLabel}>요일</Text>
             <View style={styles.chipRow}>
@@ -248,13 +291,7 @@ function AddSessionModal({
             />
 
             <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={() => {
-                  reset();
-                  onClose();
-                }}
-              >
+              <Pressable style={[styles.modalButton, styles.modalButtonSecondary]} onPress={onClose}>
                 <Text style={styles.modalButtonTextSecondary}>취소</Text>
               </Pressable>
               <Pressable
@@ -269,12 +306,22 @@ function AddSessionModal({
                     targetDurationMin: parseTarget(duration),
                     notes: notes.trim() || undefined,
                   });
-                  reset();
                 }}
               >
                 <Text style={styles.modalButtonText}>저장</Text>
               </Pressable>
             </View>
+            {editing && (
+              <Pressable
+                style={[styles.deleteButton, confirmDelete && styles.deleteButtonConfirm]}
+                onPress={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+                accessibilityRole="button"
+              >
+                <Text style={styles.deleteButtonText}>
+                  {confirmDelete ? '한 번 더 누르면 삭제' : '이 세션 삭제'}
+                </Text>
+              </Pressable>
+            )}
           </ScrollView>
         </View>
       </View>
@@ -490,6 +537,24 @@ const styles = StyleSheet.create({
   },
   modalButtonTextSecondary: {
     color: '#2f7cf6',
+    fontWeight: '700',
+  },
+  editButton: {
+    padding: 4,
+    alignSelf: 'flex-start',
+  },
+  deleteButton: {
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  deleteButtonConfirm: {
+    backgroundColor: '#e5484d',
+  },
+  deleteButtonText: {
+    color: '#ff8a8a',
     fontWeight: '700',
   },
 });

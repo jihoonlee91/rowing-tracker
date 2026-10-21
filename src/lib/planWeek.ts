@@ -62,6 +62,26 @@ export function parseTarget(text: string): number | undefined {
   return n > 0 ? n : undefined;
 }
 
+export type SessionFields = Pick<TrainingSession, 'day' | 'type' | 'title' | 'targetDistanceKm' | 'targetDurationMin' | 'notes'>;
+
+// 세션 수정: 고칠 수 있는 칸만 바꾸고 id·완료 상태·모르는 필드는 그대로 둔다.
+// 비운 칸(undefined)은 지워진다(JSON 저장 시 빠짐).
+export function applySessionEdit(sessions: TrainingSession[], id: string, fields: SessionFields): TrainingSession[] {
+  return sessions.map((s) =>
+    s.id === id
+      ? {
+          ...s,
+          day: fields.day,
+          type: fields.type,
+          title: fields.title,
+          targetDistanceKm: fields.targetDistanceKm,
+          targetDurationMin: fields.targetDurationMin,
+          notes: fields.notes,
+        }
+      : s
+  );
+}
+
 // 저장된 계획 JSON 읽기: 깨진 항목은 버리고 모르는 필드는 보존(이전·이후 형식 호환).
 export function normalizeSessions(raw: unknown): TrainingSession[] {
   if (!Array.isArray(raw)) return [];
