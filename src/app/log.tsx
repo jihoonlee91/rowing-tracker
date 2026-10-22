@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -28,8 +28,8 @@ import {
   type WorkoutRecord,
 } from '../lib/workouts';
 
-function todayText() {
-  const d = new Date();
+function dateText(ms = Date.now()) {
+  const d = new Date(ms);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
@@ -55,13 +55,18 @@ function formatDate(ms: number) {
 }
 
 export default function LogScreen() {
-  const { records, addWorkout, removeWorkout, importWorkouts } = useWorkoutLog();
+  const { records, addWorkout, removeWorkout, updateWorkout, importWorkouts } = useWorkoutLog();
   const [distance, setDistance] = useState('');
   const [time, setTime] = useState('');
   const [spm, setSpm] = useState('');
-  const [date, setDate] = useState(todayText);
+  const [date, setDate] = useState(() => dateText());
   const [error, setError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 수정 중인 기록과 채워 넣은 처음 값. 처음 값 그대로인 칸은 원래 값을 유지한다
+  // (GPS 1234.567m·스트로크율 23.47처럼 화면에서 반올림된 값이 수정 저장 때 바뀌지 않게, 날짜를 안 바꾸면 시각도 유지).
+  const [editing, setEditing] = useState<{ record: WorkoutRecord; initial: FormText } | null>(null);
+  const listRef = useRef<FlatList<WorkoutRecord>>(null);
+  const formY = useRef(0);
 
   const week = useMemo(() => weekTotals(records ?? []), [records]);
   const weeks = useMemo(() => weeklyDistances(records ?? [], 8), [records]);
@@ -76,25 +81,68 @@ export default function LogScreen() {
       ? `${formatPacePer500m(distanceM / seconds)} /500m · ${Math.round(concept2Watts(distanceM, seconds))} W`
       : null;
 
+  const resetForm = () => {
+    setDistance('');
+    setTime('');
+    setSpm('');
+    setDate(dateText());
+  };
+
+  const startEdit = (record: WorkoutRecord) => {
+    const initial = recordToForm(record);
+    setEditing({ record, initial });
+    setDistance(initial.distance);
+    setTime(initial.time);
+    setSpm(initial.spm);
+    setDate(initial.date);
+    setError(null);
+    setConfirmId(null);
+    listRef.current?.scrollToOffset({ offset: formY.current, animated: true });
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setError(null);
+    resetForm();
+  };
+
   const submit = async () => {
     if (!(distanceM > 0)) return setError('거리를 2000 또는 2k처럼 입력해주세요.');
     if (!seconds) return setError('시간을 7:30.5 또는 1:02:03처럼 입력해주세요.');
     const startedAt = parseDate(date);
     if (startedAt == null) return setError('날짜를 2026-10-14처럼 입력해주세요(미래 날짜는 안 돼요).');
-    const rate = spm.trim() ? Number(spm) : 0;
-    if (spm.trim() && !(rate >= 10 && rate <= 60)) return setError('평균 spm은 10~60 사이로 입력해주세요(비워도 돼요).');
+    const rate = spm.trim() ? Number(spm.replace(',', '.')) : 0;
+    // 수정 때 안 건드린 spm은 검사하지 않는다(트래커가 저장한 5 spm 같은 값 때문에 다른 칸을 못 고치지 않게).
+    const spmUntouched = editing != null && spm.trim() === editing.initial.spm;
+    if (spm.trim() && !spmUntouched && !(rate >= 10 && rate <= 60)) return setError('평균 spm은 10~60 사이로 입력해주세요(비워도 돼요).');
     setError(null);
     try {
-      await addWorkout({
-        source: 'erg',
-        startedAt,
-        distanceMeters: distanceM,
-        durationSeconds: seconds,
-        strokeRate: rate > 0 ? rate : undefined,
-      });
-      setDistance('');
-      setTime('');
-      setSpm('');
+      if (editing) {
+        const { record, initial } = editing;
+        const changed = (now: string, before: string) => now.trim() !== before;
+        await updateWorkout(record.id, {
+          distanceMeters: changed(distance, initial.distance) ? distanceM : undefined,
+          durationSeconds: changed(time, initial.time) ? seconds : undefined,
+          startedAt: changed(date, initial.date) ? startedAt : undefined,
+          strokeRate: changed(spm, initial.spm) ? (rate > 0 ? rate : null) : undefined,
+        });
+        setEditing(null);
+      } else {
+        await addWorkout({
+          source: 'erg',
+          startedAt,
+          distanceMeters: distanceM,
+          durationSeconds: seconds,
+          strokeRate: rate > 0 ? rate : undefined,
+        });
+      }
+      // 새 기록 입력은 날짜를 그대로 둔다(같은 날 여러 개 입력). 수정이 끝나면 오늘로.
+      if (editing) resetForm();
+      else {
+        setDistance('');
+        setTime('');
+        setSpm('');
+      }
     } catch {
       setError('저장에 실패했어요.');
     }
@@ -141,8 +189,17 @@ export default function LogScreen() {
 
               {trendOptions.length > 0 && <PaceTrendCard records={records ?? []} options={trendOptions} />}
 
-              <View style={styles.form}>
-                <Text style={styles.formTitle}>에르고 기록 입력</Text>
+              <View
+                style={[styles.form, editing && styles.formEditing]}
+                onLayout={(e) => {
+                  formY.current = e.nativeEvent.layout.y;
+                }}
+              >
+                <Text style={styles.formTitle}>
+                  {editing
+                    ? `기록 수정 · ${formatDate(editing.record.startedAt)} ${editing.record.source === 'erg' ? '에르고' : '수상(GPS)'}`
+                    : '에르고 기록 입력'}
+                </Text>
                 <View style={styles.row}>
                   <Field label="거리 (m, 2k도 돼요)" value={distance} onChange={setDistance} placeholder="2000" />
                   <Field label="시간" value={time} onChange={setTime} placeholder="7:30.5" />
@@ -153,9 +210,16 @@ export default function LogScreen() {
                 </View>
                 {preview && <Text style={styles.preview}>{preview}</Text>}
                 {error && <Text style={styles.error}>{error}</Text>}
-                <Pressable style={styles.saveButton} onPress={submit} accessibilityRole="button">
-                  <Text style={styles.saveButtonText}>저장</Text>
-                </Pressable>
+                <View style={styles.row}>
+                  {editing && (
+                    <Pressable style={styles.secondaryButton} onPress={cancelEdit} accessibilityRole="button">
+                      <Text style={styles.secondaryButtonText}>취소</Text>
+                    </Pressable>
+                  )}
+                  <Pressable style={[styles.saveButton, { flex: 1 }]} onPress={submit} accessibilityRole="button">
+                    <Text style={styles.saveButtonText}>{editing ? '수정 저장' : '저장'}</Text>
+                  </Pressable>
+                </View>
               </View>
 
               <Text style={styles.sectionTitle}>기록</Text>
@@ -171,9 +235,12 @@ export default function LogScreen() {
             <RecordRow
               record={item}
               confirming={confirmId === item.id}
+              editing={editing?.record.id === item.id}
+              onEdit={() => startEdit(item)}
               onDelete={() => {
                 if (confirmId === item.id) {
                   setConfirmId(null);
+                  if (editing?.record.id === item.id) cancelEdit();
                   removeWorkout(item.id);
                 } else {
                   setConfirmId(item.id);
@@ -400,13 +467,29 @@ function formatShortDate(ms: number) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+type FormText = { distance: string; time: string; spm: string; date: string };
+
+// 기록 → 입력 칸 글자(수정 창에 채울 값)
+function recordToForm(r: WorkoutRecord): FormText {
+  return {
+    distance: String(Math.round(r.distanceMeters * 10) / 10),
+    time: formatErgTime(r.durationSeconds),
+    spm: r.strokeRate ? String(Math.round(r.strokeRate * 10) / 10) : '',
+    date: dateText(r.startedAt),
+  };
+}
+
 function RecordRow({
   record,
   confirming,
+  editing,
+  onEdit,
   onDelete,
 }: {
   record: WorkoutRecord;
   confirming: boolean;
+  editing: boolean;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const isErg = record.source === 'erg';
@@ -416,8 +499,13 @@ function RecordRow({
     record.strokeRate ? `${record.strokeRate.toFixed(0)} spm` : null,
   ].filter(Boolean);
   return (
-    <View style={styles.record}>
-      <View style={{ flex: 1 }}>
+    <View style={[styles.record, editing && styles.recordEditing]}>
+      <Pressable
+        style={{ flex: 1 }}
+        onPress={onEdit}
+        accessibilityRole="button"
+        accessibilityLabel={`${formatDate(record.startedAt)} 기록 수정`}
+      >
         <Text style={styles.recordTitle}>
           {formatDate(record.startedAt)} · {isErg ? '에르고' : '수상(GPS)'}
         </Text>
@@ -426,7 +514,10 @@ function RecordRow({
           {isErg ? formatErgTime(record.durationSeconds) : formatDuration(record.durationSeconds)}
         </Text>
         <Text style={styles.recordSub}>{details.join(' · ')}</Text>
-      </View>
+      </Pressable>
+      <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="수정">
+        <Text style={styles.delete}>수정</Text>
+      </Pressable>
       <Pressable onPress={onDelete} hitSlop={8} accessibilityRole="button">
         <Text style={confirming ? styles.deleteConfirm : styles.delete}>
           {confirming ? '삭제?' : '삭제'}
@@ -499,6 +590,7 @@ const styles = StyleSheet.create({
   bestTime: { color: '#fff', fontSize: 18, fontWeight: '700' },
   bestSub: { color: '#c7d6e6', fontSize: 12, flexShrink: 1 },
   form: { backgroundColor: '#122d4a', borderRadius: 16, padding: 16, marginBottom: 16 },
+  formEditing: { borderWidth: 1, borderColor: '#2f7cf6' },
   formTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 8 },
   row: { flexDirection: 'row', gap: 10 },
   field: { flex: 1, marginBottom: 10 },
@@ -536,6 +628,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  recordEditing: { borderWidth: 1, borderColor: '#2f7cf6' },
   recordTitle: { color: '#8fa8c4', fontSize: 13 },
   recordMain: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 2 },
   recordSub: { color: '#c7d6e6', fontSize: 13, marginTop: 2 },

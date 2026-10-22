@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 import { mergeImported } from './csv';
-import { normalizeRecords, type WorkoutRecord } from './workouts';
+import { applyRecordEdit, normalizeRecords, type RecordPatch, type WorkoutRecord } from './workouts';
 
 const STORAGE_KEY = 'rowing-tracker:workouts:v1';
 
@@ -61,6 +61,13 @@ export function useWorkoutLog() {
     []
   );
 
+  // 없는 id(그 사이 지워짐)면 아무것도 바꾸지 않는다.
+  const updateWorkout = useCallback(
+    (id: string, patch: RecordPatch) =>
+      mutate((prev) => prev.map((r) => (r.id === id ? applyRecordEdit(r, patch) : r))),
+    []
+  );
+
   // CSV에서 읽은 기록을 더한다(이미 있는 기록은 건너뜀). 더한 개수를 돌려준다.
   const importWorkouts = useCallback(async (incoming: WorkoutRecord[]) => {
     let added = 0;
@@ -72,5 +79,5 @@ export function useWorkoutLog() {
     return added;
   }, []);
 
-  return { records, addWorkout, removeWorkout, importWorkouts };
+  return { records, addWorkout, removeWorkout, updateWorkout, importWorkouts };
 }

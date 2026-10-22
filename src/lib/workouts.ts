@@ -158,6 +158,25 @@ export function parseDistance(text: string): number | null {
   return rounded > 0 && rounded <= 200000 ? rounded : null;
 }
 
+// 기록 수정: 바꾼 칸만 덮어쓰고 id·source·모르는 필드(notes 등)는 그대로 둔다.
+// undefined = 안 바꿈, strokeRate null = 지움.
+export type RecordPatch = {
+  startedAt?: number;
+  distanceMeters?: number;
+  durationSeconds?: number;
+  strokeRate?: number | null;
+};
+
+export function applyRecordEdit(record: WorkoutRecord, patch: RecordPatch): WorkoutRecord {
+  const next: WorkoutRecord = { ...record };
+  if (patch.startedAt !== undefined) next.startedAt = patch.startedAt;
+  if (patch.distanceMeters !== undefined) next.distanceMeters = patch.distanceMeters;
+  if (patch.durationSeconds !== undefined) next.durationSeconds = patch.durationSeconds;
+  if (patch.strokeRate === null) delete next.strokeRate;
+  else if (patch.strokeRate !== undefined) next.strokeRate = patch.strokeRate;
+  return next;
+}
+
 // 너무 짧은 운동(실수로 시작→종료)은 저장하지 않는다.
 export function isWorthSaving(distanceMeters: number, durationSeconds: number) {
   return durationSeconds >= 30 || distanceMeters >= 50;

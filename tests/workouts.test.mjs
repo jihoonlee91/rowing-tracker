@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  applyRecordEdit,
   concept2Watts,
   ergBests,
   ergPaceTrend,
@@ -132,4 +133,28 @@ test('실수로 바로 끈 운동은 저장 안 함', () => {
   assert.equal(isWorthSaving(10, 5), false);
   assert.equal(isWorthSaving(0, 30), true);
   assert.equal(isWorthSaving(60, 10), true);
+});
+
+test('applyRecordEdit: 바꾼 칸만 덮어쓰고 id·source·모르는 필드 유지', () => {
+  const r = { id: 'a', source: 'gps', startedAt: 1000, distanceMeters: 1234.567, durationSeconds: 400, strokeRate: 23.47, notes: 'x', extra: 1 };
+  const same = applyRecordEdit(r, {});
+  assert.deepEqual(same, r);
+  assert.notEqual(same, r);
+  const e = applyRecordEdit(r, { durationSeconds: 420.5 });
+  assert.equal(e.durationSeconds, 420.5);
+  assert.equal(e.distanceMeters, 1234.567);
+  assert.equal(e.strokeRate, 23.47);
+  assert.equal(e.id, 'a');
+  assert.equal(e.source, 'gps');
+  assert.equal(e.extra, 1);
+  assert.equal(r.durationSeconds, 400);
+});
+
+test('applyRecordEdit: strokeRate null이면 지움, 숫자면 바꿈', () => {
+  const r = { id: 'a', source: 'erg', startedAt: 1, distanceMeters: 2000, durationSeconds: 450, strokeRate: 24 };
+  assert.equal('strokeRate' in applyRecordEdit(r, { strokeRate: null }), false);
+  assert.equal(applyRecordEdit(r, { strokeRate: 28 }).strokeRate, 28);
+  const moved = applyRecordEdit(r, { startedAt: 5, distanceMeters: 5000 });
+  assert.equal(moved.startedAt, 5);
+  assert.equal(moved.distanceMeters, 5000);
 });
