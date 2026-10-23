@@ -159,12 +159,13 @@ export function parseDistance(text: string): number | null {
 }
 
 // 기록 수정: 바꾼 칸만 덮어쓰고 id·source·모르는 필드(notes 등)는 그대로 둔다.
-// undefined = 안 바꿈, strokeRate null = 지움.
+// undefined = 안 바꿈, strokeRate·notes null = 지움.
 export type RecordPatch = {
   startedAt?: number;
   distanceMeters?: number;
   durationSeconds?: number;
   strokeRate?: number | null;
+  notes?: string | null;
 };
 
 export function applyRecordEdit(record: WorkoutRecord, patch: RecordPatch): WorkoutRecord {
@@ -174,7 +175,22 @@ export function applyRecordEdit(record: WorkoutRecord, patch: RecordPatch): Work
   if (patch.durationSeconds !== undefined) next.durationSeconds = patch.durationSeconds;
   if (patch.strokeRate === null) delete next.strokeRate;
   else if (patch.strokeRate !== undefined) next.strokeRate = patch.strokeRate;
+  if (patch.notes === null) delete next.notes;
+  else if (patch.notes !== undefined) next.notes = patch.notes;
   return next;
+}
+
+// 메모 입력: 앞뒤 공백·연속 빈 줄 정리, 최대 NOTES_MAX자. 비면 null(저장 안 함).
+export const NOTES_MAX = 200;
+
+export function cleanNotes(text: string): string | null {
+  const s = text.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return s ? s.slice(0, NOTES_MAX) : null;
+}
+
+// 저장값의 메모(이전 버전·가져온 CSV는 문자열이 아닐 수 있음) → 화면에 보일 글자
+export function notesText(r: Pick<WorkoutRecord, 'notes'>): string {
+  return typeof r.notes === 'string' ? r.notes.trim() : '';
 }
 
 // 너무 짧은 운동(실수로 시작→종료)은 저장하지 않는다.

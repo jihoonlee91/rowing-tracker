@@ -16,10 +16,13 @@ import { formatDuration, formatPacePer500m } from '../lib/geo';
 import { useWorkoutLog } from '../lib/useWorkoutLog';
 import {
   avgSpeed,
+  cleanNotes,
   concept2Watts,
   ergBests,
   ergPaceTrend,
   formatErgTime,
+  NOTES_MAX,
+  notesText,
   parseDistance,
   parseDuration,
   trendDistances,
@@ -60,6 +63,7 @@ export default function LogScreen() {
   const [time, setTime] = useState('');
   const [spm, setSpm] = useState('');
   const [date, setDate] = useState(() => dateText());
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   // 수정 중인 기록과 채워 넣은 처음 값. 처음 값 그대로인 칸은 원래 값을 유지한다
@@ -86,6 +90,7 @@ export default function LogScreen() {
     setTime('');
     setSpm('');
     setDate(dateText());
+    setNotes('');
   };
 
   const startEdit = (record: WorkoutRecord) => {
@@ -95,6 +100,7 @@ export default function LogScreen() {
     setTime(initial.time);
     setSpm(initial.spm);
     setDate(initial.date);
+    setNotes(initial.notes);
     setError(null);
     setConfirmId(null);
     listRef.current?.scrollToOffset({ offset: formY.current, animated: true });
@@ -125,6 +131,7 @@ export default function LogScreen() {
           durationSeconds: changed(time, initial.time) ? seconds : undefined,
           startedAt: changed(date, initial.date) ? startedAt : undefined,
           strokeRate: changed(spm, initial.spm) ? (rate > 0 ? rate : null) : undefined,
+          notes: changed(notes, initial.notes) ? cleanNotes(notes) : undefined,
         });
         setEditing(null);
       } else {
@@ -134,6 +141,7 @@ export default function LogScreen() {
           distanceMeters: distanceM,
           durationSeconds: seconds,
           strokeRate: rate > 0 ? rate : undefined,
+          notes: cleanNotes(notes) ?? undefined,
         });
       }
       // 새 기록 입력은 날짜를 그대로 둔다(같은 날 여러 개 입력). 수정이 끝나면 오늘로.
@@ -142,6 +150,7 @@ export default function LogScreen() {
         setDistance('');
         setTime('');
         setSpm('');
+        setNotes('');
       }
     } catch {
       setError('저장에 실패했어요.');
@@ -207,6 +216,19 @@ export default function LogScreen() {
                 <View style={styles.row}>
                   <Field label="평균 spm (선택)" value={spm} onChange={setSpm} placeholder="24" numeric />
                   <Field label="날짜" value={date} onChange={setDate} placeholder="2026-10-14" />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>메모 (선택)</Text>
+                  <TextInput
+                    style={[styles.input, styles.notesInput]}
+                    value={notes}
+                    onChangeText={setNotes}
+                    placeholder="4×500m 인터벌, 컨디션 좋음"
+                    placeholderTextColor="#5d7896"
+                    multiline
+                    maxLength={NOTES_MAX}
+                    accessibilityLabel="메모 (선택)"
+                  />
                 </View>
                 {preview && <Text style={styles.preview}>{preview}</Text>}
                 {error && <Text style={styles.error}>{error}</Text>}
@@ -467,7 +489,7 @@ function formatShortDate(ms: number) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-type FormText = { distance: string; time: string; spm: string; date: string };
+type FormText = { distance: string; time: string; spm: string; date: string; notes: string };
 
 // 기록 → 입력 칸 글자(수정 창에 채울 값)
 function recordToForm(r: WorkoutRecord): FormText {
@@ -476,6 +498,7 @@ function recordToForm(r: WorkoutRecord): FormText {
     time: formatErgTime(r.durationSeconds),
     spm: r.strokeRate ? String(Math.round(r.strokeRate * 10) / 10) : '',
     date: dateText(r.startedAt),
+    notes: notesText(r),
   };
 }
 
@@ -498,6 +521,7 @@ function RecordRow({
     isErg ? `${Math.round(concept2Watts(record.distanceMeters, record.durationSeconds))} W` : null,
     record.strokeRate ? `${record.strokeRate.toFixed(0)} spm` : null,
   ].filter(Boolean);
+  const memo = notesText(record);
   return (
     <View style={[styles.record, editing && styles.recordEditing]}>
       <Pressable
@@ -514,6 +538,11 @@ function RecordRow({
           {isErg ? formatErgTime(record.durationSeconds) : formatDuration(record.durationSeconds)}
         </Text>
         <Text style={styles.recordSub}>{details.join(' · ')}</Text>
+        {!!memo && (
+          <Text style={styles.recordNotes} numberOfLines={2}>
+            {memo}
+          </Text>
+        )}
       </Pressable>
       <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel="수정">
         <Text style={styles.delete}>수정</Text>
@@ -632,6 +661,8 @@ const styles = StyleSheet.create({
   recordTitle: { color: '#8fa8c4', fontSize: 13 },
   recordMain: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 2 },
   recordSub: { color: '#c7d6e6', fontSize: 13, marginTop: 2 },
+  recordNotes: { color: '#8fa8c4', fontSize: 13, marginTop: 4, fontStyle: 'italic' },
+  notesInput: { minHeight: 44, maxHeight: 120, textAlignVertical: 'top' },
   delete: { color: '#8fa8c4', fontSize: 14, paddingLeft: 12 },
   deleteConfirm: { color: '#ff6b61', fontSize: 14, fontWeight: '700', paddingLeft: 12 },
 });

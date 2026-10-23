@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   applyRecordEdit,
+  cleanNotes,
   concept2Watts,
   ergBests,
   ergPaceTrend,
   formatErgTime,
   isWorthSaving,
+  notesText,
   normalizeRecords,
   parseDistance,
   parseDuration,
@@ -157,4 +159,26 @@ test('applyRecordEdit: strokeRate null이면 지움, 숫자면 바꿈', () => {
   const moved = applyRecordEdit(r, { startedAt: 5, distanceMeters: 5000 });
   assert.equal(moved.startedAt, 5);
   assert.equal(moved.distanceMeters, 5000);
+});
+
+test('cleanNotes: 공백·빈 줄 정리, 비면 null, 200자 제한', () => {
+  assert.equal(cleanNotes('   '), null);
+  assert.equal(cleanNotes('  4x500m  '), '4x500m');
+  assert.equal(cleanNotes('a  \r\n\r\n\r\n\nb'), 'a\n\nb');
+  assert.equal(cleanNotes('x'.repeat(250)).length, 200);
+});
+
+test('applyRecordEdit: 메모 바꾸기·지우기·유지', () => {
+  const r = { id: 'a', source: 'erg', startedAt: 1, distanceMeters: 2000, durationSeconds: 450, notes: '처음', extra: 1 };
+  assert.equal(applyRecordEdit(r, { notes: '바꿈' }).notes, '바꿈');
+  assert.equal('notes' in applyRecordEdit(r, { notes: null }), false);
+  const kept = applyRecordEdit(r, { distanceMeters: 2001 });
+  assert.equal(kept.notes, '처음');
+  assert.equal(kept.extra, 1);
+});
+
+test('notesText: 문자열이 아닌 저장값은 빈 글자', () => {
+  assert.equal(notesText({ notes: ' 메모 ' }), '메모');
+  assert.equal(notesText({}), '');
+  assert.equal(notesText({ notes: 42 }), '');
 });
