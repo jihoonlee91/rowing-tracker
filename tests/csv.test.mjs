@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { csvToRecords, mergeImported, parseCsv, recordsToCsv } from '../src/lib/csv.ts';
+import { csvToRecords, decodeCsvBytes, mergeImported, parseCsv, recordsToCsv } from '../src/lib/csv.ts';
 
 const sample = [
   {
@@ -77,4 +77,15 @@ test('id가 달라도 같은 분·거리·시간이면 중복으로 봄', () => 
   const dup = { ...sample[0], id: 'other', startedAt: sample[0].startedAt + 20_000 };
   assert.equal(mergeImported(sample, [dup]).added, 0);
   assert.equal(mergeImported(sample, [{ ...dup, durationSeconds: 452.4 }]).added, 1);
+});
+
+test('파일 글자 변환 — UTF-8(BOM 포함)과 엑셀 CP949 CSV', () => {
+  const utf8 = new TextEncoder().encode('﻿date,notes\n2026-10-10,메모 좋음');
+  assert.equal(decodeCsvBytes(utf8), 'date,notes\n2026-10-10,메모 좋음');
+  // '메모 좋음'을 CP949로 저장한 바이트
+  const cp949 = new Uint8Array([0xb8, 0xde, 0xb8, 0xf0, 0x20, 0xc1, 0xc1, 0xc0, 0xbd]);
+  assert.equal(decodeCsvBytes(cp949), '메모 좋음');
+  // 파일로 읽은 앱 CSV가 그대로 가져와짐
+  const bytes = new TextEncoder().encode('﻿' + recordsToCsv(sample));
+  assert.equal(csvToRecords(decodeCsvBytes(bytes)).records.length, sample.length);
 });

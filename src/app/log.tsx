@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { csvToRecords, recordsToCsv } from '../lib/csv';
+import { csvToRecords, decodeCsvBytes, MAX_IMPORT_BYTES, recordsToCsv } from '../lib/csv';
 import { formatDuration, formatPacePer500m } from '../lib/geo';
 import { useWorkoutLog } from '../lib/useWorkoutLog';
 import {
@@ -412,10 +412,14 @@ function BackupCard({
     }
   };
 
-  const importCsv = async () => {
-    const parsed = csvToRecords(text);
+  const importCsv = async (source: string, fromFile = false) => {
+    const parsed = csvToRecords(source);
     if (!parsed.format) {
-      setMessage('읽을 수 있는 CSV가 아니에요. 이 앱에서 내보낸 CSV나 콘셉트2 로그북 CSV를 붙여넣어 주세요.');
+      setMessage(
+        fromFile
+          ? '읽을 수 있는 CSV 파일이 아니에요. 이 앱에서 내보낸 CSV나 콘셉트2 로그북 CSV를 골라 주세요.'
+          : '읽을 수 있는 CSV가 아니에요. 이 앱에서 내보낸 CSV나 콘셉트2 로그북 CSV를 붙여넣어 주세요.'
+      );
       return;
     }
     try {
@@ -426,10 +430,33 @@ function BackupCard({
           (dup > 0 ? ` · 이미 있는 ${dup}개 건너뜀` : '') +
           (parsed.skipped > 0 ? ` · ${parsed.skipped}줄 제외(형식 오류·RowErg 아님)` : '')
       );
-      if (added > 0 || dup > 0) setText('');
+      if (!fromFile && (added > 0 || dup > 0)) setText('');
     } catch {
       setMessage('가져오기에 실패했어요(기존 기록은 그대로예요).');
     }
+  };
+
+  // 웹: 콘셉트2 로그북에서 내려받은 CSV 파일을 바로 고른다(열어서 복사·붙여넣기 하지 않게).
+  // 폰은 파일 선택에 새 네이티브 모듈이 필요해 붙여넣기만 둔다.
+  const pickFile = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,text/csv';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > MAX_IMPORT_BYTES) {
+        setMessage('파일이 너무 커요(5MB 넘음). CSV 파일이 맞는지 확인해 주세요.');
+        return;
+      }
+      try {
+        const source = decodeCsvBytes(new Uint8Array(await file.arrayBuffer()));
+        await importCsv(source, true);
+      } catch {
+        setMessage('파일을 읽지 못했어요(기존 기록은 그대로예요).');
+      }
+    };
+    input.click();
   };
 
   return (
@@ -456,8 +483,16 @@ function BackupCard({
       {open && (
         <View style={{ marginTop: 10 }}>
           <Text style={styles.fieldLabel}>
-            이 앱에서 내보낸 CSV, 또는 콘셉트2 로그북(log.concept2.com)에서 내려받은 CSV 내용을 붙여넣으세요. 이미 있는 기록은 건너뜁니다.
+            이 앱에서 내보낸 CSV, 또는 콘셉트2 로그북(log.concept2.com)에서 내려받은 CSV를{' '}
+            {Platform.OS === 'web' ? '파일로 고르거나 내용을 붙여넣으세요' : '내용을 붙여넣으세요'}. 이미 있는 기록은 건너뜁니다.
           </Text>
+          {Platform.OS === 'web' && (
+            <View style={[styles.row, { marginTop: 10 }]}>
+              <Pressable style={styles.secondaryButton} onPress={pickFile} accessibilityRole="button">
+                <Text style={styles.secondaryButtonText}>CSV 파일 고르기</Text>
+              </Pressable>
+            </View>
+          )}
           <TextInput
             style={[styles.input, styles.csvInput]}
             value={text}
@@ -471,7 +506,7 @@ function BackupCard({
           />
           <Pressable
             style={[styles.saveButton, !text.trim() && { opacity: 0.5 }]}
-            onPress={importCsv}
+            onPress={() => importCsv(text)}
             disabled={!text.trim()}
             accessibilityRole="button"
           >

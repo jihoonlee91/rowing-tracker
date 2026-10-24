@@ -195,3 +195,20 @@ export function mergeImported(existing: WorkoutRecord[], incoming: WorkoutRecord
   }
   return { merged: [...existing, ...added], added: added.length };
 }
+
+// 가져올 CSV 파일 크기 상한. 몇 년치 로그북도 1MB가 안 되니, 넘으면 잘못 고른 파일로 본다.
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+
+// 파일로 고른 CSV를 글자로 바꾼다. 보통은 UTF-8이지만, 한글 윈도우 엑셀에서 '다른 이름으로 저장'한
+// CSV는 CP949(EUC-KR)라 UTF-8로 읽으면 메모가 깨진다 → UTF-8이 아니면 EUC-KR로 다시 읽는다.
+export function decodeCsvBytes(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    try {
+      return new TextDecoder('euc-kr').decode(bytes);
+    } catch {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  }
+}
