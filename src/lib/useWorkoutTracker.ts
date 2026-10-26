@@ -58,7 +58,7 @@ export function useWorkoutTracker() {
         };
         trackRef.current = accumulateTrack(
           trackRef.current,
-          { ...next, speed: loc.coords.speed },
+          { ...next, speed: loc.coords.speed, accuracy: loc.coords.accuracy },
           newSegmentRef.current
         );
         newSegmentRef.current = false;
