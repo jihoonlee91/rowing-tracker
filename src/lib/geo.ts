@@ -87,6 +87,37 @@ export function accumulateTrack(
   return { distanceMeters, currentSpeed, last: sample };
 }
 
+export const SPLIT_METERS = 500;
+
+export type SplitProgress = { distanceMeters: number; elapsedSeconds: number };
+
+// 500m 스플릿: marks[i] = (i+1)×500m 지점을 지난 경과 시간(초, 일시정지 제외).
+// GPS 점 사이에서 500m 배수를 넘으면 두 점 사이를 선형 보간해 그 지점의 시간을 잡는다(점 간격이 길어도 스플릿이 늦게 찍히지 않게).
+export function advanceSplits(
+  marks: number[],
+  from: SplitProgress,
+  to: SplitProgress,
+  splitMeters = SPLIT_METERS
+): number[] {
+  const gained = to.distanceMeters - from.distanceMeters;
+  if (!(gained > 0)) return marks;
+  let next = marks;
+  let target = (marks.length + 1) * splitMeters;
+  while (to.distanceMeters >= target) {
+    const ratio = Math.min(1, Math.max(0, (target - from.distanceMeters) / gained));
+    const at = from.elapsedSeconds + ratio * (to.elapsedSeconds - from.elapsedSeconds);
+    if (next === marks) next = [...marks];
+    next.push(at);
+    target += splitMeters;
+  }
+  return next;
+}
+
+// 지점별 경과 시간 → 구간마다 걸린 시간(초)
+export function splitDurations(marks: number[]): number[] {
+  return marks.map((t, i) => t - (i > 0 ? marks[i - 1] : 0));
+}
+
 export function formatDuration(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

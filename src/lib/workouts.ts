@@ -13,6 +13,8 @@ export type WorkoutRecord = {
   // 평균 스트로크율. 에르고 입력은 화면에 나온 값을 그대로 받는다.
   strokeRate?: number;
   notes?: string;
+  // GPS 운동의 500m 구간마다 걸린 초(2026-10-28부터 저장). 이전 기록엔 없다.
+  splits?: number[];
 };
 
 // "7:30.5", "1:02:03", "7:30", "450" → 초. 형식이 틀리거나 0 이하면 null.
@@ -173,6 +175,13 @@ export function applyRecordEdit(record: WorkoutRecord, patch: RecordPatch): Work
   if (patch.startedAt !== undefined) next.startedAt = patch.startedAt;
   if (patch.distanceMeters !== undefined) next.distanceMeters = patch.distanceMeters;
   if (patch.durationSeconds !== undefined) next.durationSeconds = patch.durationSeconds;
+  // 거리·시간을 고치면 GPS로 잰 스플릿과 맞지 않으니 버린다.
+  if (
+    (patch.distanceMeters !== undefined && patch.distanceMeters !== record.distanceMeters) ||
+    (patch.durationSeconds !== undefined && patch.durationSeconds !== record.durationSeconds)
+  ) {
+    delete next.splits;
+  }
   if (patch.strokeRate === null) delete next.strokeRate;
   else if (patch.strokeRate !== undefined) next.strokeRate = patch.strokeRate;
   if (patch.notes === null) delete next.notes;
@@ -191,6 +200,13 @@ export function cleanNotes(text: string): string | null {
 // 저장값의 메모(이전 버전·가져온 CSV는 문자열이 아닐 수 있음) → 화면에 보일 글자
 export function notesText(r: Pick<WorkoutRecord, 'notes'>): string {
   return typeof r.notes === 'string' ? r.notes.trim() : '';
+}
+
+// 저장값의 스플릿 → 화면에 보일 구간 시간. 배열이 아니거나 이상한 값이 섞이면 보이지 않는다.
+export function recordSplits(r: Pick<WorkoutRecord, 'splits'>): number[] {
+  const s = r.splits as unknown;
+  if (!Array.isArray(s) || s.length === 0) return [];
+  return s.every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0) ? (s as number[]) : [];
 }
 
 // 너무 짧은 운동(실수로 시작→종료)은 저장하지 않는다.

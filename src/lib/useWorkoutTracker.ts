@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { accumulateTrack, type TrackAccumulator } from './geo';
+import { accumulateTrack, advanceSplits, splitDurations, type TrackAccumulator } from './geo';
 
 export type TrackPoint = {
   latitude: number;
@@ -13,6 +13,8 @@ export type WorkoutSummary = {
   distanceMeters: number;
   durationSeconds: number;
   strokeCount: number;
+  // 500m 구간마다 걸린 초(끝까지 못 간 마지막 구간은 뺌)
+  splits: number[];
 };
 
 export type TrackerStatus = 'idle' | 'requesting-permission' | 'tracking' | 'paused' | 'denied';
@@ -21,11 +23,11 @@ const EMPTY_TRACK: TrackAccumulator = { distanceMeters: 0, currentSpeed: 0, last
 
 export function useWorkoutTracker() {
   const [status, setStatus] = useState<TrackerStatus>('idle');
-  const [points, setPoints] = useState<TrackPoint[]>([]);
   const [distanceMeters, setDistanceMeters] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [strokeCount, setStrokeCount] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
+  const [splits, setSplits] = useState<number[]>([]);
 
   const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const startedAtRef = useRef<number | null>(null);
@@ -36,6 +38,9 @@ export function useWorkoutTracker() {
   const newSegmentRef = useRef(true);
   const strokeCountRef = useRef(0);
   const workoutStartedAtRef = useRef<number | null>(null);
+  // 500m 지점별 경과 시간과 직전 점의 (거리, 경과 시간). GPS 점 목록은 쌓지 않는다(긴 운동에서 메모리만 늘던 것).
+  const splitMarksRef = useRef<number[]>([]);
+  const lastProgressRef = useRef({ distanceMeters: 0, elapsedSeconds: 0 });
 
   const stopWatch = useCallback(() => {
     if (intervalRef.current) {
@@ -62,9 +67,20 @@ export function useWorkoutTracker() {
           newSegmentRef.current
         );
         newSegmentRef.current = false;
+        const progress = {
+          distanceMeters: trackRef.current.distanceMeters,
+          elapsedSeconds:
+            pausedAccumRef.current +
+            (startedAtRef.current ? (Date.now() - startedAtRef.current) / 1000 : 0),
+        };
+        const marks = advanceSplits(splitMarksRef.current, lastProgressRef.current, progress);
+        lastProgressRef.current = progress;
+        if (marks !== splitMarksRef.current) {
+          splitMarksRef.current = marks;
+          setSplits(splitDurations(marks));
+        }
         setDistanceMeters(trackRef.current.distanceMeters);
         setCurrentSpeed(trackRef.current.currentSpeed);
-        setPoints((prev) => [...prev, next]);
       }
     );
 
@@ -87,7 +103,9 @@ export function useWorkoutTracker() {
       return;
     }
 
-    setPoints([]);
+    setSplits([]);
+    splitMarksRef.current = [];
+    lastProgressRef.current = { distanceMeters: 0, elapsedSeconds: 0 };
     setDistanceMeters(0);
     setElapsedSeconds(0);
     setStrokeCount(0);
@@ -137,6 +155,7 @@ export function useWorkoutTracker() {
       distanceMeters: trackRef.current.distanceMeters,
       durationSeconds: pausedAccumRef.current,
       strokeCount: strokeCountRef.current,
+      splits: splitDurations(splitMarksRef.current),
     };
   }, [stopWatch]);
 
@@ -157,7 +176,7 @@ export function useWorkoutTracker() {
 
   return {
     status,
-    points,
+    splits,
     distanceMeters,
     elapsedSeconds,
     strokeCount,

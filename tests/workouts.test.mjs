@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   applyRecordEdit,
+  recordSplits,
   cleanNotes,
   concept2Watts,
   ergBests,
@@ -181,4 +182,16 @@ test('notesText: 문자열이 아닌 저장값은 빈 글자', () => {
   assert.equal(notesText({ notes: ' 메모 ' }), '메모');
   assert.equal(notesText({}), '');
   assert.equal(notesText({ notes: 42 }), '');
+});
+test('스플릿: 저장값 검사, 거리·시간을 고치면 버림(메모만 고치면 유지)', () => {
+  assert.deepEqual(recordSplits({ splits: [121.3, 119.8] }), [121.3, 119.8]);
+  assert.deepEqual(recordSplits({}), []);
+  assert.deepEqual(recordSplits({ splits: 'x' }), []);
+  assert.deepEqual(recordSplits({ splits: [120, null] }), []);
+  const r = { id: 'a', source: 'gps', startedAt: 1, distanceMeters: 1000, durationSeconds: 241, splits: [121, 120] };
+  assert.deepEqual(applyRecordEdit(r, { notes: '좋음' }).splits, [121, 120]);
+  assert.deepEqual(applyRecordEdit(r, { distanceMeters: 1000 }).splits, [121, 120]);
+  assert.equal(applyRecordEdit(r, { distanceMeters: 1100 }).splits, undefined);
+  assert.equal(applyRecordEdit(r, { durationSeconds: 250 }).splits, undefined);
+  assert.deepEqual(r.splits, [121, 120]); // 원본은 그대로
 });

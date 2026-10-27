@@ -23,6 +23,7 @@ import {
   formatErgTime,
   NOTES_MAX,
   notesText,
+  recordSplits,
   parseDistance,
   parseDuration,
   trendDistances,
@@ -557,6 +558,7 @@ function RecordRow({
     record.strokeRate ? `${record.strokeRate.toFixed(0)} spm` : null,
   ].filter(Boolean);
   const memo = notesText(record);
+  const splits = recordSplits(record);
   return (
     <View style={[styles.record, editing && styles.recordEditing]}>
       <Pressable
@@ -573,6 +575,11 @@ function RecordRow({
           {isErg ? formatErgTime(record.durationSeconds) : formatDuration(record.durationSeconds)}
         </Text>
         <Text style={styles.recordSub}>{details.join(' · ')}</Text>
+        {splits.length > 0 && (
+          <Text style={styles.recordSub} numberOfLines={2}>
+            500m 스플릿 {splits.map((t) => formatErgTime(t)).join(' · ')}
+          </Text>
+        )}
         {!!memo && (
           <Text style={styles.recordNotes} numberOfLines={2}>
             {memo}

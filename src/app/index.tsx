@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { formatDuration, formatPacePer500m } from '../lib/geo';
 import { addWorkout } from '../lib/useWorkoutLog';
 import { useWorkoutTracker } from '../lib/useWorkoutTracker';
-import { isWorthSaving } from '../lib/workouts';
+import { formatErgTime, isWorthSaving } from '../lib/workouts';
 
 export default function TrackerScreen() {
   const tracker = useWorkoutTracker();
@@ -16,6 +16,7 @@ export default function TrackerScreen() {
     strokeRate,
     currentSpeed,
     avgSpeed,
+    splits,
   } = tracker;
 
   const [savedNote, setSavedNote] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export default function TrackerScreen() {
         durationSeconds: summary.durationSeconds,
         strokeCount: summary.strokeCount || undefined,
         strokeRate,
+        splits: summary.splits.length > 0 ? summary.splits : undefined,
       });
       setSavedNote('기록 탭에 저장했어요.');
     } catch {
@@ -65,6 +67,8 @@ export default function TrackerScreen() {
         <Metric label="스트로크" value={`${strokeCount}`} />
         <Metric label="스트로크율 spm" value={strokeRate.toFixed(1)} />
       </View>
+
+      {splits.length > 0 && <SplitList splits={splits} />}
 
       {status === 'denied' && (
         <Text style={styles.warning}>
@@ -104,6 +108,30 @@ function Metric({ label, value, big }: { label: string; value: string; big?: boo
     <View style={styles.metric}>
       <Text style={big ? styles.metricValueBig : styles.metricValue}>{value}</Text>
       <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// 최근 500m 스플릿(새것이 오른쪽), 가장 빠른 구간은 초록. 오래된 것은 기록 탭에서 전부 보인다.
+const SPLITS_SHOWN = 6;
+
+function SplitList({ splits }: { splits: number[] }) {
+  const fastest = Math.min(...splits);
+  const start = Math.max(0, splits.length - SPLITS_SHOWN);
+  return (
+    <View
+      style={styles.splits}
+      accessibilityLabel={`500m 스플릿 ${splits.map((s, i) => `${i + 1}구간 ${formatErgTime(s)}`).join(', ')}`}
+    >
+      <Text style={styles.metricLabel}>500m 스플릿</Text>
+      <View style={styles.splitRow}>
+        {splits.slice(start).map((s, i) => (
+          <View key={start + i} style={styles.splitChip}>
+            <Text style={styles.splitIndex}>{start + i + 1}</Text>
+            <Text style={[styles.splitTime, s === fastest && styles.splitFastest]}>{formatErgTime(s)}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -170,6 +198,40 @@ const styles = StyleSheet.create({
     color: '#8fa8c4',
     marginTop: 4,
     fontSize: 13,
+  },
+  splits: {
+    backgroundColor: '#122d4a',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  splitRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  splitChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    backgroundColor: '#1b3a5c',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  splitIndex: {
+    color: '#8fa8c4',
+    fontSize: 12,
+  },
+  splitTime: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  splitFastest: {
+    color: '#9fd8a8',
   },
   note: {
     color: '#9fd8a8',
