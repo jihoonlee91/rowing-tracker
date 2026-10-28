@@ -1,7 +1,23 @@
 // 기록 CSV 내보내기·가져오기(순수 함수). 테스트가 .ts를 바로 import하므로 값 import 없이 타입만 가져온다.
 import type { WorkoutRecord } from './workouts';
 
-const HEADER = ['date', 'source', 'distance_m', 'time_s', 'time', 'pace_500m', 'spm', 'strokes', 'notes', 'id'];
+// splits_500m는 2026-10-29에 맨 뒤에 붙임: 그 전엔 백업했다 되살리면 GPS 500m 스플릿이 사라졌다.
+// 열 이름으로 찾으므로 이 열이 없는 이전 백업도 그대로 읽힌다.
+const HEADER = ['date', 'source', 'distance_m', 'time_s', 'time', 'pace_500m', 'spm', 'strokes', 'notes', 'id', 'splits_500m'];
+
+// 구간 초를 0.1초로 반올림해 빈칸으로 잇는다: [124.23, 121.9] → "124.2 121.9"
+function splitsCell(splits: unknown) {
+  if (!Array.isArray(splits) || !splits.every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0)) return '';
+  return splits.map((v) => Math.round(v * 10) / 10).join(' ');
+}
+
+// "124.2 121.9"(쉼표·세미콜론 구분도 허용) → [124.2, 121.9]. 하나라도 이상하면 버린다.
+function parseSplits(text: string | undefined): number[] | null {
+  const parts = (text ?? '').trim().split(/[\s;,]+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  const values = parts.map(Number);
+  return values.every((v) => Number.isFinite(v) && v > 0) ? values : null;
+}
 
 function pad(n: number) {
   return String(n).padStart(2, '0');
@@ -41,6 +57,7 @@ export function recordsToCsv(records: WorkoutRecord[]) {
         r.strokeCount ?? '',
         r.notes ?? '',
         r.id,
+        splitsCell(r.splits),
       ]
         .map(cell)
         .join(',')
@@ -117,7 +134,7 @@ export function csvToRecords(text: string): CsvImport {
   const col = (...names: string[]) => head.findIndex((h) => names.includes(h));
 
   let format: CsvImport['format'] = null;
-  let iDate = -1, iDist = -1, iTime = -1, iSpm = -1, iStrokes = -1, iId = -1, iSource = -1, iNotes = -1, iType = -1;
+  let iDate = -1, iDist = -1, iTime = -1, iSpm = -1, iStrokes = -1, iId = -1, iSource = -1, iNotes = -1, iType = -1, iSplits = -1;
   if (head.includes('distance_m') && head.includes('time_s')) {
     format = 'app';
     iDate = col('date');
@@ -128,6 +145,7 @@ export function csvToRecords(text: string): CsvImport {
     iId = col('id');
     iSource = col('source');
     iNotes = col('notes');
+    iSplits = col('splits_500m');
   } else if (head.includes('work distance') && head.includes('work time (seconds)')) {
     format = 'concept2';
     iDate = col('date');
@@ -175,6 +193,8 @@ export function csvToRecords(text: string): CsvImport {
     if (spm > 0) rec.strokeRate = spm;
     if (strokes > 0) rec.strokeCount = Math.round(strokes);
     if (notes) rec.notes = notes;
+    const splits = iSplits >= 0 ? parseSplits(r[iSplits]) : null;
+    if (splits) rec.splits = splits;
     records.push(rec);
   }
   return { records, skipped, format };
