@@ -10,19 +10,26 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { fetchRowingEvents, RaceEvent } from '../lib/raceHub';
+import { eventLink, fetchRowingEvents, RaceEvent, RegistrationStatus } from '../lib/raceHub';
 
-const STATUS_LABEL: Record<RaceEvent['registrationStatus'], string> = {
+const STATUS_LABEL: Record<RegistrationStatus, string> = {
   open: '접수중',
   upcoming: '접수예정',
   closed: '접수마감',
+  unknown: '확인 필요',
 };
 
-const STATUS_COLOR: Record<RaceEvent['registrationStatus'], string> = {
+const STATUS_COLOR: Record<RegistrationStatus, string> = {
   open: '#2fbf71',
   upcoming: '#f2b134',
   closed: '#6b7a8f',
+  unknown: '#6b7a8f',
 };
+
+function openLink(url: string | null) {
+  if (!url) return;
+  Linking.openURL(url).catch(() => {});
+}
 
 export default function RacesScreen() {
   const [events, setEvents] = useState<RaceEvent[] | null>(null);
@@ -80,10 +87,14 @@ export default function RacesScreen() {
             <Text style={styles.emptyText}>현재 등록된 조정 대회 정보가 없어요.</Text>
           </View>
         }
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          const url = eventLink(item);
+          return (
           <Pressable
             style={styles.card}
-            onPress={() => Linking.openURL(item.linkVerified ? item.applyUrl : item.sourceUrl)}
+            disabled={!url}
+            accessibilityRole={url ? 'link' : undefined}
+            onPress={() => openLink(url)}
           >
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle} numberOfLines={2}>
@@ -100,8 +111,10 @@ export default function RacesScreen() {
             {item.distances.length > 0 && (
               <Text style={styles.cardMeta}>{item.distances.join(' / ')}</Text>
             )}
+            {!url && <Text style={styles.cardMeta}>링크 없음</Text>}
           </Pressable>
-        )}
+          );
+        }}
       />
     </SafeAreaView>
   );
