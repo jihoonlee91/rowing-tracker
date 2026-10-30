@@ -10,6 +10,7 @@ export default function TrackerScreen() {
   const tracker = useWorkoutTracker();
   const {
     status,
+    gpsError,
     distanceMeters,
     elapsedSeconds,
     strokeCount,
@@ -76,6 +77,8 @@ export default function TrackerScreen() {
         </Text>
       )}
 
+      {gpsError && <Text style={styles.warning}>{gpsError}</Text>}
+
       {savedNote && !isActive && <Text style={styles.note}>{savedNote}</Text>}
 
       {isActive && (
@@ -87,6 +90,10 @@ export default function TrackerScreen() {
       <View style={styles.controls}>
         {status === 'idle' || status === 'denied' ? (
           <PrimaryButton label="운동 시작" onPress={start} />
+        ) : status === 'starting' ? (
+          <View style={[styles.button, styles.buttonSecondary]} accessibilityLiveRegion="polite">
+            <Text style={[styles.buttonText, styles.buttonTextSecondary]}>GPS 연결 중…</Text>
+          </View>
         ) : isTracking ? (
           <>
             <SecondaryButton label="일시정지" onPress={tracker.pause} />

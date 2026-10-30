@@ -1,3 +1,4 @@
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accumulateTrack, advanceSplits, splitDurations, type TrackAccumulator } from './geo';
@@ -17,9 +18,13 @@ export type WorkoutSummary = {
   splits: number[];
 };
 
-export type TrackerStatus = 'idle' | 'requesting-permission' | 'tracking' | 'paused' | 'denied';
+// starting: 시작·재개를 누르고 GPS가 연결되기를 기다리는 중(이때 또 누르면 위치 구독이 겹쳐 거리가 두 번 더해진다)
+export type TrackerStatus = 'idle' | 'starting' | 'tracking' | 'paused' | 'denied';
 
 const EMPTY_TRACK: TrackAccumulator = { distanceMeters: 0, currentSpeed: 0, last: null };
+
+const KEEP_AWAKE_TAG = 'rowing-workout';
+const GPS_ERROR = 'GPS를 켜지 못했어요. 위치 서비스가 켜져 있는지 확인하고 다시 눌러 주세요.';
 
 export function useWorkoutTracker() {
   const [status, setStatus] = useState<TrackerStatus>('idle');
@@ -28,6 +33,7 @@ export function useWorkoutTracker() {
   const [strokeCount, setStrokeCount] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [splits, setSplits] = useState<number[]>([]);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const startedAtRef = useRef<number | null>(null);
@@ -96,10 +102,17 @@ export function useWorkoutTracker() {
   }, []);
 
   const start = useCallback(async () => {
-    setStatus('requesting-permission');
-    const { status: permStatus } = await Location.requestForegroundPermissionsAsync();
-    if (permStatus !== 'granted') {
-      setStatus('denied');
+    setStatus('starting');
+    setGpsError(null);
+    try {
+      const { status: permStatus } = await Location.requestForegroundPermissionsAsync();
+      if (permStatus !== 'granted') {
+        setStatus('denied');
+        return;
+      }
+    } catch {
+      setGpsError(GPS_ERROR);
+      setStatus('idle');
       return;
     }
 
@@ -115,7 +128,15 @@ export function useWorkoutTracker() {
     strokeCountRef.current = 0;
     workoutStartedAtRef.current = Date.now();
 
-    await beginSegment();
+    try {
+      await beginSegment();
+    } catch {
+      // 위치 서비스가 꺼져 있으면 여기로 온다. 시작 대기 화면에 멈춰 있지 않게 처음으로 돌린다.
+      startedAtRef.current = null;
+      workoutStartedAtRef.current = null;
+      setGpsError(GPS_ERROR);
+      setStatus('idle');
+    }
   }, [beginSegment]);
 
   const pause = useCallback(() => {
@@ -132,7 +153,16 @@ export function useWorkoutTracker() {
   }, [stopWatch]);
 
   const resume = useCallback(async () => {
-    await beginSegment();
+    setStatus('starting');
+    setGpsError(null);
+    try {
+      await beginSegment();
+    } catch {
+      // 재개에 실패해도 지금까지의 운동은 일시정지 상태로 남겨 종료·저장할 수 있게 한다.
+      startedAtRef.current = null;
+      setGpsError(GPS_ERROR);
+      setStatus('paused');
+    }
   }, [beginSegment]);
 
   // 끝난 운동 요약을 돌려준다(저장은 화면에서).
@@ -171,11 +201,24 @@ export function useWorkoutTracker() {
     };
   }, [stopWatch]);
 
+  // 위치 권한이 '앱 사용 중'뿐이라 화면이 꺼지면 GPS가 멈춘다. 시간은 계속 흘러서 거리가 빠지고
+  // 평균 페이스가 느리게 나오므로, 운동 중(일시정지 포함)에는 화면을 켜 둔다.
+  const isWorkingOut = status === 'starting' || status === 'tracking' || status === 'paused';
+  useEffect(() => {
+    if (!isWorkingOut) return;
+    // 웹 일부 브라우저는 지원하지 않는다. 화면 켜 두기 실패로 운동을 막지는 않는다.
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+    };
+  }, [isWorkingOut]);
+
   const avgSpeed = elapsedSeconds > 0 ? distanceMeters / elapsedSeconds : 0;
   const strokeRate = elapsedSeconds > 0 ? (strokeCount / elapsedSeconds) * 60 : 0;
 
   return {
     status,
+    gpsError,
     splits,
     distanceMeters,
     elapsedSeconds,
