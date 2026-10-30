@@ -65,6 +65,22 @@ export function normalizeEvents(body: unknown): RaceEvent[] {
   return out;
 }
 
+// API를 status=all로 부르므로 끝난 대회도 온다. 끝나지 않은 대회만 가까운 날짜순으로 보여 준다.
+// 날짜가 없거나 형식이 다른 대회는 끝났는지 알 수 없으니 숨기지 않고 맨 뒤에 둔다.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
+
+export function upcomingEvents(events: RaceEvent[], now = new Date()): RaceEvent[] {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const known = (d: string | undefined) => (d && ISO_DATE.test(d) ? d.slice(0, 10) : '');
+  return events
+    .filter((e) => {
+      const last = known(e.endDate) || known(e.date);
+      return !last || last >= today;
+    })
+    .sort((a, b) => (known(a.date) || '9999').localeCompare(known(b.date) || '9999'));
+}
+
 export function isWebUrl(url: string): boolean {
   return /^https?:\/\/[^\s/]+/i.test(url);
 }
@@ -88,5 +104,5 @@ export async function fetchRowingEvents(): Promise<RaceEvent[]> {
   } catch {
     throw new Error('대회 정보 형식이 올바르지 않아요.');
   }
-  return normalizeEvents(body);
+  return upcomingEvents(normalizeEvents(body));
 }

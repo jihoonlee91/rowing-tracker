@@ -84,7 +84,7 @@ export default function RacesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
         ListEmptyComponent={
           <View style={styles.centered}>
-            <Text style={styles.emptyText}>현재 등록된 조정 대회 정보가 없어요.</Text>
+            <Text style={styles.emptyText}>앞으로 열릴 조정 대회 정보가 없어요.</Text>
           </View>
         }
         renderItem={({ item }) => {
